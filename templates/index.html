@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WKRT-FM 104.7 — The Home of Classic Rock</title>
+<style>
+  :root {
+    --bg:      #0d0d0d;
+    --card:    #181818;
+    --border:  #2a2a2a;
+    --accent:  #e85d04;
+    --accent2: #f48c06;
+    --text:    #e8e8e8;
+    --dim:     #777;
+    --green:   #4caf50;
+    --red:     #ff4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    padding-bottom: 48px;
+  }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 16px; }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 22px 0 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-call {
+    font-size: 2rem;
+    font-weight: 900;
+    letter-spacing: 3px;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .logo-tag {
+    font-size: 0.7rem;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: #200;
+    color: var(--red);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 2px;
+    padding: 5px 11px;
+    border-radius: 4px;
+    border: 1px solid #ff444430;
+  }
+  .live-pill .dot {
+    width: 7px; height: 7px;
+    background: var(--red);
+    border-radius: 50%;
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+  #listener-count { color: var(--dim); font-size: 0.85rem; }
+
+  /* ── Player ── */
+  .player-bar {
+    margin: 20px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .play-btn {
+    flex-shrink: 0;
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .15s;
+  }
+  .play-btn:hover { background: var(--accent2); }
+  .play-btn svg { pointer-events: none; }
+  .player-info { flex: 1; min-width: 0; }
+  .player-track {
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .player-label { font-size: 0.72rem; color: var(--dim); margin-top: 2px; }
+  .volume-wrap { display: flex; align-items: center; gap: 8px; }
+  .volume-wrap svg { color: var(--dim); flex-shrink: 0; }
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 80px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  /* ── Grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 14px;
+  }
+  @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card-full { grid-column: 1 / -1; }
+  .card-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+
+  /* ── Now playing ── */
+  .np-artist { font-size: 1.45rem; font-weight: 700; line-height: 1.2; }
+  .np-title  { font-size: 1rem; color: var(--dim); margin-top: 5px; }
+  .np-album  { font-size: 0.78rem; color: #555; margin-top: 4px; }
+  .np-year {
+    display: inline-block;
+    margin-top: 10px;
+    background: #222;
+    color: var(--accent2);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 11px;
+    border-radius: 20px;
+  }
+  .np-next {
+    margin-top: 14px;
+    font-size: 0.78rem;
+    color: var(--dim);
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+  .np-next span { color: #aaa; }
+
+  /* ── DJ ── */
+  .dj-quote {
+    font-style: italic;
+    color: #ccc;
+    line-height: 1.65;
+    font-size: 0.93rem;
+    border-left: 3px solid var(--accent);
+    padding-left: 14px;
+  }
+  .dj-empty { color: var(--dim); font-style: italic; font-size: 0.85rem; }
+
+  /* ── Recent tracks ── */
+  .track-list { list-style: none; }
+  .track-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.86rem;
+    gap: 8px;
+  }
+  .track-list li:last-child { border-bottom: none; }
+  .tl-left { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tl-artist { font-weight: 600; }
+  .tl-title  { color: var(--dim); }
+  .tl-year   { color: var(--accent2); font-size: 0.72rem; flex-shrink: 0; }
+
+  /* ── Footer status ── */
+  .status-bar {
+    display: flex;
+    gap: 24px;
+    margin-top: 12px;
+    font-size: 0.75rem;
+    color: var(--dim);
+    flex-wrap: wrap;
+  }
+  .status-bar span { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="logo-call">WKRT · 104.7</div>
+      <div class="logo-tag">The Home of Classic Rock</div>
+    </div>
+    <div class="header-right">
+      <div class="live-pill"><div class="dot"></div>LIVE</div>
+      <div id="listener-count">— listeners</div>
+    </div>
+  </header>
+
+  <!-- Custom player bar -->
+  <div class="player-bar">
+    <button class="play-btn" id="play-btn" onclick="togglePlay()" title="Play / Pause">
+      <svg id="play-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+    </button>
+    <div class="player-info">
+      <div class="player-track" id="player-track">Click play to start streaming</div>
+      <div class="player-label">WKRT-FM 104.7 · Live Stream</div>
+    </div>
+    <div class="volume-wrap">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+      </svg>
+      <input type="range" id="volume" min="0" max="1" step="0.05" value="0.8" oninput="setVolume(this.value)">
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- Now playing -->
+    <div class="card card-full">
+      <div class="card-label">Now Playing</div>
+      <div id="now-playing">
+        <div style="color:var(--dim);font-style:italic">Connecting to stream...</div>
+      </div>
+    </div>
+
+    <!-- DJ Roxanne -->
+    <div class="card">
+      <div class="card-label">DJ Roxanne</div>
+      <div id="dj-section">
+        <div class="dj-empty">Waiting for Roxanne...</div>
+      </div>
+    </div>
+
+    <!-- Recent tracks -->
+    <div class="card">
+      <div class="card-label">Recently Played</div>
+      <ul class="track-list" id="recent-tracks">
+        <li style="color:var(--dim);font-style:italic;font-size:.85rem;border:none">Nothing yet</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <div class="status-bar">
+    <div>Engine: <span id="cache-state">—</span></div>
+    <div>On air since: <span id="uptime">—</span></div>
+  </div>
+
+</div>
+
+<!-- Hidden HTML5 audio element -->
+<audio id="audio" preload="none"></audio>
+
+<script>
+  const audio = document.getElementById('audio');
+  const playBtn = document.getElementById('play-btn');
+  const playIcon = document.getElementById('play-icon');
+  let streamUrl = '';
+  let playing = false;
+  let lastDjScript = '';
+  let streamReady = false;
+
+  const PLAY_SVG  = '<path d="M8 5v14l11-7z"/>';
+  const PAUSE_SVG = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+
+  function togglePlay() {
+    if (!streamUrl) return;
+    if (playing) {
+      audio.pause();
+      audio.src = '';   // fully stop buffering
+      playing = false;
+      playIcon.innerHTML = PLAY_SVG;
+    } else {
+      audio.src = streamUrl;
+      audio.volume = parseFloat(document.getElementById('volume').value);
+      audio.play().catch(() => {});
+      playing = true;
+      playIcon.innerHTML = PAUSE_SVG;
+    }
+  }
+
+  function setVolume(v) {
+    audio.volume = parseFloat(v);
+  }
+
+  function fmtDate(iso) {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    } catch(e) { return iso; }
+  }
+
+  function esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async function refresh() {
+    let d;
+    try {
+      const r = await fetch('/api/status');
+      d = await r.json();
+    } catch(e) { return; }
+
+    // Build stream URL using the browser's hostname so it works
+    // regardless of whether the server uses "localhost" internally.
+    if (!streamReady && d.stream_port && d.stream_mount) {
+      streamUrl = `http://${window.location.hostname}:${d.stream_port}${d.stream_mount}`;
+      streamReady = true;
+    }
+
+    // Listener count
+    const lc = d.listener_count || 0;
+    document.getElementById('listener-count').textContent =
+      lc === 1 ? '1 listener' : lc + ' listeners';
+
+    // Now playing
+    const npEl = document.getElementById('now-playing');
+    if (d.current_track) {
+      const t = d.current_track;
+      const album = t.album ? `<div class="np-album">${esc(t.album)}</div>` : '';
+      const next = d.next_track
+        ? `<div class="np-next">Up next: <span>${esc(d.next_track.artist)} — ${esc(d.next_track.title)}</span></div>`
+        : '';
+      npEl.innerHTML =
+        `<div class="np-artist">${esc(t.artist)}</div>
+         <div class="np-title">${esc(t.title)}</div>
+         ${album}
+         <span class="np-year">${t.year}</span>
+         ${next}`;
+      document.getElementById('player-track').textContent =
+        t.artist + ' — ' + t.title;
+    }
+
+    // DJ script
+    if (d.last_dj_script && d.last_dj_script !== lastDjScript) {
+      lastDjScript = d.last_dj_script;
+      document.getElementById('dj-section').innerHTML =
+        `<div class="dj-quote">${esc(d.last_dj_script)}</div>`;
+    }
+
+    // Recent tracks
+    if (d.recent_tracks && d.recent_tracks.length) {
+      document.getElementById('recent-tracks').innerHTML =
+        d.recent_tracks.map(t =>
+          `<li>
+            <span class="tl-left">
+              <span class="tl-artist">${esc(t.artist)}</span>
+              <span class="tl-title"> — ${esc(t.title)}</span>
+            </span>
+            <span class="tl-year">${t.year}</span>
+          </li>`
+        ).join('');
+    }
+
+    // Status
+    document.getElementById('cache-state').textContent = d.cache_state || '—';
+    document.getElementById('uptime').textContent = fmtDate(d.started_at);
+  }
+
+  refresh();
+  setInterval(refresh, 4000);
+</script>
+</body>
+</html>

@@ -209,6 +209,7 @@ class TopOfHourScheduler:
         self._connect_id: Optional[Path] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._tz_name = engine.cfg["station"].get("timezone", "UTC")
 
     def start(self):
         # Pre-generate connect ID immediately
@@ -234,10 +235,14 @@ class TopOfHourScheduler:
             self._pending_toh = None  # consume it
             return path
 
-    def is_top_of_hour(self) -> bool:
-        """True if we're within 30 seconds of the hour."""
+    def _now(self):
         import datetime
-        now = datetime.datetime.now()
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo(self._tz_name))
+
+    def is_top_of_hour(self) -> bool:
+        """True if we're within 30 seconds of the hour (station local time)."""
+        now = self._now()
         return now.minute == 0 and now.second < 30
 
     def refresh_connect_id(self):
@@ -248,17 +253,16 @@ class TopOfHourScheduler:
         self._stop.set()
 
     def _clock_watcher(self):
-        import datetime
         last_pregen_hour = -1
 
         while not self._stop.is_set():
-            now = datetime.datetime.now()
+            now = self._now()
             # At :55, pre-generate for the coming :00
             if (now.minute == 60 - self.PREGEN_MINUTES_BEFORE
                     and now.hour != last_pregen_hour):
                 last_pregen_hour = now.hour
                 next_hour = (now.hour + 1) % 24
-                log.info(f"Pre-generating top-of-hour ID for {next_hour}:00")
+                log.info(f"Pre-generating top-of-hour ID for {next_hour}:00 ({self._tz_name})")
                 threading.Thread(
                     target=self._generate_toh,
                     args=(next_hour,),

@@ -3,6 +3,7 @@ call_sign = "WKRT"
 frequency = "104.7"
 tagline = "The Home of Classic Rock"
 city = "Boston"
+timezone = "America/New_York"
 
 [paths]
 music_dir = "./music"
@@ -76,6 +77,9 @@ format = "mp3"
 bitrate = "192k"
 sample_rate = 44100
 channels = 2
+
+[web]
+port = 8080
 
 [icecast]
 host = "localhost"

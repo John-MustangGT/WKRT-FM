@@ -3,11 +3,13 @@ DJ script generator.
 Calls Claude API to generate contextual radio DJ banter.
 Returns plain text scripts ready for TTS.
 """
+import datetime
 import random
 import logging
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import anthropic
 
@@ -109,10 +111,14 @@ Rules:
 """,
 }
 
-_TIME_OF_DAY_HINTS = [
-    "morning drive", "mid-morning", "afternoon", "afternoon drive",
-    "evening", "late night"
-]
+def _time_of_day(tz_name: str) -> str:
+    hour = datetime.datetime.now(ZoneInfo(tz_name)).hour
+    if   5 <= hour < 10: return "morning drive"
+    elif hour < 12:      return "mid-morning"
+    elif hour < 15:      return "afternoon"
+    elif hour < 19:      return "afternoon drive"
+    elif hour < 22:      return "evening"
+    else:                return "late night"
 
 
 def _select_clip_type(weights: dict) -> ClipType:
@@ -130,6 +136,7 @@ class DJEngine:
         self.persona = cfg["dj"]["persona"].strip()
         self.station = cfg["station"]
         self.clip_weights = cfg["dj"]["clip_types"]
+        self.timezone = cfg["station"].get("timezone", "UTC")
 
     def generate(
         self,
@@ -168,7 +175,7 @@ class DJEngine:
             "city": self.station.get("city", "Boston"),
             "call_sign": self.station.get("call_sign", "WKRT"),
             "frequency": self.station.get("frequency", "104.7"),
-            "time_of_day": random.choice(_TIME_OF_DAY_HINTS),
+            "time_of_day": _time_of_day(self.timezone),
         }
         if prev_track:
             kwargs.update({

@@ -30,6 +30,8 @@ from .playlist import scan_library, PlaylistQueue, Track
 from .dj import DJEngine
 from .tts import TTSEngine
 from .mixer import Mixer
+from .state import StationState
+from .web import WebServer
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -74,6 +76,8 @@ class WKRTEngine:
         self._listener_count = 0
         self._connect_id_pending = threading.Event()
 
+        self.state = StationState()
+
         # Top-of-hour scheduler
         self.toh = TopOfHourScheduler(self, None)  # cache set after init
 
@@ -111,15 +115,23 @@ class WKRTEngine:
             f"{queue.year_count} years"
         )
 
+        # Start web UI
+        web_cfg = self.cfg.get("web", {})
+        web_port = web_cfg.get("port", 8080)
+        ice = self.cfg.get("icecast", {})
+        self.state.stream_port = ice.get("port", 8000)
+        self.state.stream_mount = ice.get("mount", "/wkrt")
+        self.state.stream_url = (
+            f"http://{ice.get('host', 'localhost')}:{self.state.stream_port}"
+            f"{self.state.stream_mount}"
+        )
+        WebServer(self.state, port=web_port).start()
+        console.print(f"[cyan]Web UI →[/cyan] http://0.0.0.0:{web_port}/")
+
         # Start Icecast stream
         self._stream_proc = self._start_icecast_stream()
         if self._stream_proc:
-            ice = self.cfg.get("icecast", {})
-            console.print(
-                f"[green]Streaming →[/green] "
-                f"http://{ice.get('host','localhost')}:{ice.get('port',8000)}"
-                f"{ice.get('mount','/wkrt')}"
-            )
+            console.print(f"[green]Streaming →[/green] {self.state.stream_url}")
 
         # Start hook server and warm the cache
         self.hooks.start()
@@ -216,6 +228,7 @@ class WKRTEngine:
                     next_track=next_track,
                 )
                 self._print_dj(script.text)
+                self.state.set_dj_script(script.text)
                 dj_clip_path = self.tts.synthesize(script.text)
             except Exception as e:
                 log.error(f"DJ generation failed: {e}")
@@ -279,6 +292,8 @@ class WKRTEngine:
     def _play(self, segment_path: Path, track: Track):
         """Feed segment to Icecast stream (or ffplay as fallback). Blocks until done."""
         self._print_now_playing(track)
+        self.state.set_now_playing(track, self.next_track)
+        self.state.set_cache_state(self.cache.state.name)
 
         # Icecast path: write segment into persistent ffmpeg pipe.
         # The -re flag makes ffmpeg read at native rate, so stdin.write()
@@ -318,12 +333,14 @@ class WKRTEngine:
     def _on_listener_connect(self):
         self._listener_count += 1
         log.info(f"Listener connected ({self._listener_count} total)")
+        self.state.set_listener_count(self._listener_count)
         self._connect_id_pending.set()
         self.cache.on_listener_connect()
 
     def _on_listener_disconnect(self):
         self._listener_count = max(0, self._listener_count - 1)
         log.info(f"Listener disconnected ({self._listener_count} remaining)")
+        self.state.set_listener_count(self._listener_count)
         self.cache.on_listener_disconnect()
 
     def _play_clip(self, clip_path: Path):
