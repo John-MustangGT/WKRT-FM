@@ -21,6 +21,9 @@ dj_every_n_tracks = 3
 crossfade_seconds = 3
 # Fade out duration at end of track before DJ clip
 fade_out_seconds = 2
+# How many seconds before track end Roxanne starts talking over the fade
+# Set to 0 to disable talkover (DJ speaks after track ends)
+dj_talkover_seconds = 8
 # Seconds of silence to trim from start/end of tracks
 trim_silence = true
 

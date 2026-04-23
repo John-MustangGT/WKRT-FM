@@ -28,6 +28,7 @@ class Mixer:
         self.output_cfg = cfg["output"]
         self.crossfade_s = cfg["playlist"]["crossfade_seconds"]
         self.fade_out_s = cfg["playlist"]["fade_out_seconds"]
+        self.talkover_s = cfg["playlist"].get("dj_talkover_seconds", 8)
         self.trim_silence = cfg["playlist"].get("trim_silence", True)
         self.spool_dir.mkdir(parents=True, exist_ok=True)
 
@@ -102,17 +103,54 @@ class Mixer:
 
     def _stitch_with_dj(self, track_path: Path, dj_path: Path, out_path: Path):
         """
-        track → fade out last N seconds → dj clip → output
-        The next track will be a separate segment (fade-in handled there).
+        Talkover mode: Roxanne starts speaking over the song's fade-out.
+
+        Timeline:
+          [---- track body ----][--- fade (talkover_s) ---]
+                                 [--- Roxanne talking --------]
         """
+        if self.talkover_s <= 0:
+            self._stitch_sequential(track_path, dj_path, out_path)
+            return
+
+        dur_track = self._get_duration(track_path)
+        dur_dj    = self._get_duration(dj_path)
+
+        # Always leave at least 3s of Roxanne's voice after the song ends,
+        # and never start the talkover past the halfway point of the track.
+        min_solo = 3.0
+        talkover = min(self.talkover_s, max(0, dur_dj - min_solo), dur_track * 0.5)
+        fade_start = max(0, dur_track - talkover)
+
+        # Filtergraph:
+        #   - Fade out the track over the talkover window
+        #   - Prepend silence to the DJ clip so it starts at fade_start
+        #   - Mix both streams (normalize=0 keeps natural levels)
+        filter_complex = (
+            f"[0:a]afade=t=out:st={fade_start:.3f}:d={talkover:.3f}[tfade];"
+            f"aevalsrc=0:d={fade_start:.3f}:s=44100:c=stereo[silence];"
+            f"[silence][1:a]concat=n=2:v=0:a=1[dj_delayed];"
+            f"[tfade][dj_delayed]amix=inputs=2:duration=longest:normalize=0[out]"
+        )
+
+        cmd = [
+            self._ffmpeg, "-y",
+            "-i", str(track_path),
+            "-i", str(dj_path),
+            "-filter_complex", filter_complex,
+            "-map", "[out]",
+            "-b:a", self.output_cfg["bitrate"],
+            "-ar", str(self.output_cfg["sample_rate"]),
+            "-ac", str(self.output_cfg["channels"]),
+            str(out_path),
+        ]
+        self._run(cmd)
+
+    def _stitch_sequential(self, track_path: Path, dj_path: Path, out_path: Path):
+        """Fallback: track fades out, then DJ speaks (no overlap)."""
         dur = self._get_duration(track_path)
         fade_start = max(0, dur - self.fade_out_s)
-
-        # Build filtergraph:
-        # 1. Apply fade-out to the track
-        # 2. Concatenate with DJ clip
-        # 3. Add a short silence pad between them for breathing room
-        silence_pad = 0.4  # seconds
+        silence_pad = 0.4
 
         filter_complex = (
             f"[0:a]afade=t=out:st={fade_start}:d={self.fade_out_s}[track_faded];"
