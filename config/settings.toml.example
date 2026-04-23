@@ -1,0 +1,91 @@
+[station]
+call_sign = "WKRT"
+frequency = "104.7"
+tagline = "The Home of Classic Rock"
+city = "Boston"
+
+[paths]
+music_dir = "./music"
+spool_dir = "./spool"
+dj_clips_dir = "./dj_clips"
+voices_dir = "./voices"
+log_dir = "./logs"
+
+[playlist]
+# How many tracks to pre-generate ahead in the spool
+lookahead = 3
+# Insert DJ clip every N tracks (0 = never, 1 = every track)
+dj_every_n_tracks = 3
+# Crossfade duration in seconds
+crossfade_seconds = 3
+# Fade out duration at end of track before DJ clip
+fade_out_seconds = 2
+# Seconds of silence to trim from start/end of tracks
+trim_silence = true
+
+# Year weights — higher = played more often
+# Default is equal weight across all years
+[playlist.year_weights]
+1980 = 1.0
+1981 = 1.0
+1982 = 1.0
+1983 = 1.0
+1984 = 1.5   # peak year, play more
+1985 = 1.5
+1986 = 1.5
+1987 = 2.0   # glam metal peak
+1988 = 2.0
+1989 = 1.5
+
+[dj]
+# DJ persona fed to Claude
+persona = """
+You are Roxanne, the afternoon drive DJ on WKRT 104.7, Boston's home of classic rock.
+Your style: warm, slightly husky voice, dry wit, encyclopedic rock knowledge.
+You love the 80s but aren't cheesy about it. You drop real facts and trivia.
+You occasionally reference Boston, the weather, or the commute.
+Keep it authentic — like a real radio DJ, not a parody of one.
+Never use phrases like 'totally', 'awesome', or 'rock on'.
+"""
+
+# Probability of different DJ clip types (must sum to 1.0)
+[dj.clip_types]
+between_tracks = 0.60     # standard between-song banter
+trivia = 0.20             # rock trivia / artist fact
+dedication = 0.10         # fake listener dedication
+station_id = 0.10         # call sign / time / weather
+
+[tts]
+# Piper voice model to use
+voice_model = "en_US-lessac-high"
+# Speed (1.0 = normal, 0.9 = slightly slower/warmer)
+speed = 0.92
+# Noise scale (lower = cleaner, higher = more natural variation)
+noise_scale = 0.667
+noise_w = 0.8
+
+[api]
+# Anthropic API key — can also set ANTHROPIC_API_KEY env var
+api_key = "your-anthropic-api-key-here"
+model = "claude-haiku-4-5-20251001"
+max_tokens = 300
+
+[output]
+# Audio format for stitched output segments
+format = "mp3"
+bitrate = "192k"
+sample_rate = 44100
+channels = 2
+
+[icecast]
+host = "localhost"
+port = 8000
+mount = "/wkrt"
+source_password = "your-icecast-source-password"
+hook_port = 8765          # local port for listener connect/disconnect events
+
+[icecast.stream]
+name = "WKRT-FM 104.7"
+description = "The Home of Classic Rock"
+genre = "Classic Rock"
+bitrate = 192

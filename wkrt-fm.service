@@ -1,0 +1,19 @@
+[Unit]
+Description=WKRT-FM Retro Radio Engine
+After=network.target sound.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/wkrt
+Environment=ANTHROPIC_API_KEY=your_key_here
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /home/pi/wkrt/main.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

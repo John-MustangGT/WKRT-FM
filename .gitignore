@@ -1,0 +1,13 @@
+config/settings.toml
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+dj_clips/
+spool/
+logs/
+voices/*.onnx
+voices/*.onnx.json
+music/
+wkrt_library.json
+shopping_list.txt
