@@ -32,6 +32,7 @@ from .tts import TTSEngine
 from .mixer import Mixer
 from .state import StationState
 from .web import WebServer
+from .context import StationContext
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class WKRTEngine:
         self._connect_id_pending = threading.Event()
 
         self.state = StationState()
+        self.context = StationContext(self.cfg)
 
         # Top-of-hour scheduler
         self.toh = TopOfHourScheduler(self, None)  # cache set after init
@@ -114,6 +116,9 @@ class WKRTEngine:
             f"[cyan]Library:[/cyan] {queue.library_size} tracks across "
             f"{queue.year_count} years"
         )
+
+        # Start context fetcher (weather + sports)
+        self.context.start()
 
         # Start web UI
         web_cfg = self.cfg.get("web", {})
@@ -226,6 +231,7 @@ class WKRTEngine:
                 script = self.dj.generate(
                     prev_track=track,
                     next_track=next_track,
+                    context=self.context.get(),
                 )
                 self._print_dj(script.text)
                 self.state.set_dj_script(script.text)

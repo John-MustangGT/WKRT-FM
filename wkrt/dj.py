@@ -143,6 +143,7 @@ class DJEngine:
         prev_track: Optional[Track] = None,
         next_track: Optional[Track] = None,
         force_type: Optional[ClipType] = None,
+        context: Optional[dict] = None,
     ) -> DJScript:
         clip_type = force_type or _select_clip_type(self.clip_weights)
 
@@ -154,7 +155,7 @@ class DJEngine:
         if clip_type == ClipType.DEDICATION and not next_track:
             clip_type = ClipType.STATION_ID
 
-        prompt = self._build_prompt(clip_type, prev_track, next_track)
+        prompt = self._build_prompt(clip_type, prev_track, next_track, context)
         text = self._call_api(prompt)
 
         return DJScript(
@@ -169,6 +170,7 @@ class DJEngine:
         clip_type: ClipType,
         prev_track: Optional[Track],
         next_track: Optional[Track],
+        context: Optional[dict] = None,
     ) -> str:
         template = _PROMPTS[clip_type]
         kwargs = {
@@ -189,7 +191,34 @@ class DJEngine:
                 "next_title": next_track.title,
                 "next_year": next_track.year,
             })
-        return template.format(**kwargs)
+        prompt = template.format(**kwargs)
+
+        # Append real-world Boston context when available
+        ctx_lines = []
+        if context:
+            w = context.get("weather", {})
+            if w:
+                wind = f", wind at {w['wind_mph']} mph" if w.get("wind_mph", 0) > 15 else ""
+                ctx_lines.append(
+                    f"- Current Boston weather: {w['temp_f']}°F, {w['conditions']}{wind}"
+                )
+                if w.get("beacon"):
+                    ctx_lines.append(
+                        f"- Old Hancock building beacon is {w['beacon']} "
+                        f"(Bostonians know: steady blue=clear, flashing blue=clouds, "
+                        f"steady red=rain, flashing red=snow)"
+                    )
+            sports = context.get("sports")
+            if sports:
+                ctx_lines.append(f"- Boston sports update: {sports}")
+
+        if ctx_lines:
+            prompt += (
+                "\n\nLive Boston context — weave in naturally if it fits the moment, "
+                "don't force it every time:\n" + "\n".join(ctx_lines)
+            )
+
+        return prompt
 
     def _call_api(self, prompt: str) -> str:
         if not self.client:
