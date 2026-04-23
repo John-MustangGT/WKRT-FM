@@ -1,4 +1,5 @@
 config/settings.toml
+.env
 .claude/
 __pycache__/
 *.pyc
