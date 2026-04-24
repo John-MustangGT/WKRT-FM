@@ -276,8 +276,9 @@ class TopOfHourScheduler:
         import datetime
         hour_str = datetime.time(hour, 0).strftime("%-I o'clock %p")
         try:
+            dj_cfg = self.engine.active_dj_cfg()
             script = self.engine.dj.generate(force_type=ClipType.TOP_OF_HOUR)
-            clip = self.engine.tts.synthesize(script.text)
+            clip = self.engine.tts.synthesize(script.text, dj_cfg)
             with self._lock:
                 self._pending_toh = clip
             log.info(f"Top-of-hour ID ready for {hour_str}")
@@ -287,8 +288,9 @@ class TopOfHourScheduler:
     def _generate_connect_id(self):
         from .dj import ClipType
         try:
+            dj_cfg = self.engine.active_dj_cfg()
             script = self.engine.dj.generate(force_type=ClipType.CONNECT_ID)
-            clip = self.engine.tts.synthesize(script.text)
+            clip = self.engine.tts.synthesize(script.text, dj_cfg)
             with self._lock:
                 self._connect_id = clip
             log.info("Connect ID ready")

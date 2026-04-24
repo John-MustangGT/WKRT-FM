@@ -32,6 +32,12 @@ def load(path: Path = _DEFAULT_CONFIG_PATH) -> dict:
     if music_dir:
         cfg.setdefault("paths", {})["music_dir"] = music_dir
 
+    # GOOGLE_APPLICATION_CREDENTIALS is read automatically by the Google SDK,
+    # but propagate WKRT_GOOGLE_CREDENTIALS as an alias for the systemd unit.
+    google_creds = os.environ.get("WKRT_GOOGLE_CREDENTIALS", "")
+    if google_creds:
+        os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", google_creds)
+
     return cfg
 
 

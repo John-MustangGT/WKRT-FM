@@ -41,20 +41,22 @@ class Mixer:
         track_path: Path,
         dj_clip_path: Optional[Path],
         segment_name: str,
-    ) -> Path:
+    ) -> tuple[Path, Optional[float]]:
         """
         Produce a finished MP3 segment: track (with fade-out) + optional DJ clip.
-        Returns path to the segment in the spool directory.
+        Returns (segment_path, dj_starts_at) where dj_starts_at is the number of
+        seconds into the segment when Roxanne begins speaking, or None if no DJ clip.
         """
         out_path = self.spool_dir / f"{segment_name}.mp3"
+        dj_starts_at: Optional[float] = None
 
         if dj_clip_path and dj_clip_path.exists():
-            self._stitch_with_dj(track_path, dj_clip_path, out_path)
+            dj_starts_at = self._stitch_with_dj(track_path, dj_clip_path, out_path)
         else:
             self._process_track_only(track_path, out_path)
 
         log.info(f"Segment ready: {out_path.name}")
-        return out_path
+        return out_path, dj_starts_at
 
     def make_crossfade(
         self,
@@ -101,17 +103,18 @@ class Mixer:
 
         return out_path
 
-    def _stitch_with_dj(self, track_path: Path, dj_path: Path, out_path: Path):
+    def _stitch_with_dj(self, track_path: Path, dj_path: Path, out_path: Path) -> float:
         """
         Talkover mode: Roxanne starts speaking over the song's fade-out.
 
         Timeline:
           [---- track body ----][--- fade (talkover_s) ---]
                                  [--- Roxanne talking --------]
+
+        Returns the number of seconds into the segment when Roxanne starts speaking.
         """
         if self.talkover_s <= 0:
-            self._stitch_sequential(track_path, dj_path, out_path)
-            return
+            return self._stitch_sequential(track_path, dj_path, out_path)
 
         dur_track = self._get_duration(track_path)
         dur_dj    = self._get_duration(dj_path)
@@ -145,9 +148,10 @@ class Mixer:
             str(out_path),
         ]
         self._run(cmd)
+        return fade_start
 
-    def _stitch_sequential(self, track_path: Path, dj_path: Path, out_path: Path):
-        """Fallback: track fades out, then DJ speaks (no overlap)."""
+    def _stitch_sequential(self, track_path: Path, dj_path: Path, out_path: Path) -> float:
+        """Fallback: track fades out, then DJ speaks (no overlap). Returns DJ start offset."""
         dur = self._get_duration(track_path)
         fade_start = max(0, dur - self.fade_out_s)
         silence_pad = 0.4
@@ -171,6 +175,7 @@ class Mixer:
             str(out_path),
         ]
         self._run(cmd)
+        return dur + silence_pad
 
     def _process_track_only(self, track_path: Path, out_path: Path):
         """Normalize and copy track with no DJ clip."""

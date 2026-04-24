@@ -88,14 +88,17 @@ def _cmd_test_dj(cfg):
         artist="Van Halen", title="Jump"
     )
 
-    console.print("[cyan]Generating DJ script via Claude API...[/cyan]")
-    dj = DJEngine(cfg)
+    djs = cfg.get("djs", [])
+    dj_cfg = djs[0] if djs else {"name": "DJ", "tts_backend": "piper", "persona": "", "clip_types": {}, "tts": {}}
+
+    console.print(f"[cyan]Generating DJ script as {dj_cfg['name']} via Claude API...[/cyan]")
+    dj = DJEngine(cfg, dj_cfg)
     script = dj.generate(prev_track=prev, next_track=next_t)
     console.print(f"\n[magenta]Script:[/magenta]\n{script.text}\n")
 
-    console.print("[cyan]Synthesizing with Piper TTS...[/cyan]")
+    console.print(f"[cyan]Synthesizing with {dj_cfg.get('tts_backend', 'piper')} TTS...[/cyan]")
     tts = TTSEngine(cfg)
-    clip_path = tts.synthesize(script.text)
+    clip_path = tts.synthesize(script.text, dj_cfg)
     console.print(f"[green]Clip:[/green] {clip_path}")
 
     ffplay = shutil.which("ffplay")
@@ -113,9 +116,11 @@ def _cmd_test_tts(cfg, text: str):
     import subprocess, shutil
 
     console = Console()
+    djs = cfg.get("djs", [])
+    dj_cfg = djs[0] if djs else {"name": "DJ", "tts_backend": "piper", "tts": {}}
     tts = TTSEngine(cfg)
-    console.print(f"[cyan]Synthesizing:[/cyan] {text}")
-    clip = tts.synthesize(text)
+    console.print(f"[cyan]Synthesizing as {dj_cfg['name']}:[/cyan] {text}")
+    clip = tts.synthesize(text, dj_cfg)
     console.print(f"[green]Output:[/green] {clip}")
 
     ffplay = shutil.which("ffplay")

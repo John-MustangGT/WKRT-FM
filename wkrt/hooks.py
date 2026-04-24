@@ -13,6 +13,7 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
@@ -23,21 +24,25 @@ class _HookHandler(BaseHTTPRequestHandler):
     on_disconnect: Callable = None
 
     def do_GET(self):
-        if self.path == "/connect":
-            log.info("Icecast: listener connected")
+        path = urlparse(self.path).path  # strip any query params Icecast may append
+        if path == "/connect":
+            log.info("Icecast: listener connected (webhook)")
             if self.on_connect:
                 self.on_connect()
             self._ok()
-        elif self.path == "/disconnect":
-            log.info("Icecast: listener disconnected")
+        elif path == "/disconnect":
+            log.info("Icecast: listener disconnected (webhook)")
             if self.on_disconnect:
                 self.on_disconnect()
             self._ok()
-        elif self.path == "/health":
+        elif path == "/health":
             self._ok()
         else:
             self.send_response(404)
             self.end_headers()
+
+    def do_POST(self):
+        self.do_GET()  # Icecast may POST in some configurations
 
     def _ok(self):
         self.send_response(200)

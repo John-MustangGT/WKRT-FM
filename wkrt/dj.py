@@ -129,13 +129,15 @@ def _select_clip_type(weights: dict) -> ClipType:
 
 
 class DJEngine:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, dj_cfg: dict):
         self.cfg = cfg
+        self.dj_cfg = dj_cfg
+        self.name = dj_cfg["name"]
         api_key = cfg["api"].get("api_key", "")
         self.client = anthropic.Anthropic(api_key=api_key) if api_key else None
-        self.persona = cfg["dj"]["persona"].strip()
+        self.persona = dj_cfg["persona"].strip()
         self.station = cfg["station"]
-        self.clip_weights = cfg["dj"]["clip_types"]
+        self.clip_weights = dj_cfg["clip_types"]
         self.timezone = cfg["station"].get("timezone", "UTC")
 
     def generate(
@@ -239,11 +241,11 @@ class DJEngine:
 
     def _fallback_script(self) -> str:
         """Used when API is unavailable."""
+        cs = self.station["call_sign"]
+        freq = self.station["frequency"]
         fallbacks = [
-            f"You're listening to {self.station['call_sign']} {self.station['frequency']}, "
-            f"{self.station['tagline']}. More rock coming right up.",
-            f"That's classic rock on {self.station['call_sign']} {self.station['frequency']}.",
-            f"{self.station['call_sign']} — {self.station['tagline']}. "
-            f"We'll be right back with more.",
+            f"You're listening to {cs} {freq}, {self.station['tagline']}. More rock coming right up.",
+            f"That's classic rock on {cs} {freq}. {self.name} back with more after this.",
+            f"{cs} — {self.station['tagline']}. We'll be right back.",
         ]
         return random.choice(fallbacks)
