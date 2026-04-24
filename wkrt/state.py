@@ -14,6 +14,8 @@ class StationState:
         self.listener_count = 0
         self.last_dj_script = ""
         self.current_dj = ""
+        self.dj_override: Optional[str] = None
+        self.dj_names: list = []
         self.recent_tracks = []   # list of dicts, newest first
         self.cache_state = "COLD"
         self.stream_url = ""
@@ -41,6 +43,14 @@ class StationState:
         with self._lock:
             self.current_dj = name
 
+    def set_dj_override(self, name: Optional[str]):
+        with self._lock:
+            self.dj_override = name
+
+    def set_dj_names(self, names: list):
+        with self._lock:
+            self.dj_names = list(names)
+
     def set_listener_count(self, count: int):
         with self._lock:
             self.listener_count = count
@@ -67,6 +77,8 @@ class StationState:
                 } if n else None,
                 "listener_count": self.listener_count,
                 "current_dj": self.current_dj,
+                "dj_override": self.dj_override,
+                "dj_names": list(self.dj_names),
                 "last_dj_script": self.last_dj_script,
                 "recent_tracks": list(self.recent_tracks),
                 "cache_state": self.cache_state,

@@ -226,6 +226,7 @@
       <div class="logo-tag">The Home of Classic Rock</div>
     </div>
     <div class="header-right">
+      <a href="/admin" style="color:var(--dim);font-size:0.75rem;text-decoration:none;letter-spacing:1px;padding:5px 10px;border:1px solid var(--border);border-radius:4px;">ADMIN</a>
       <div class="live-pill"><div class="dot"></div>LIVE</div>
       <div id="listener-count">— listeners</div>
     </div>
@@ -260,11 +261,11 @@
       </div>
     </div>
 
-    <!-- DJ Roxanne -->
+    <!-- DJ -->
     <div class="card">
-      <div class="card-label">DJ Roxanne</div>
+      <div class="card-label" id="dj-label">On Air</div>
       <div id="dj-section">
-        <div class="dj-empty">Waiting for Roxanne...</div>
+        <div class="dj-empty">Waiting for the DJ...</div>
       </div>
     </div>
 
@@ -366,6 +367,12 @@
          ${next}`;
       document.getElementById('player-track').textContent =
         t.artist + ' — ' + t.title;
+    }
+
+    // DJ label
+    if (d.current_dj) {
+      const override = d.dj_override ? ' ★' : '';
+      document.getElementById('dj-label').textContent = `DJ ${d.current_dj.toUpperCase()}${override}`;
     }
 
     // DJ script

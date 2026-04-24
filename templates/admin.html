@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WKRT-FM 104.7 — Admin</title>
+<style>
+  :root {
+    --bg:      #0d0d0d;
+    --card:    #181818;
+    --border:  #2a2a2a;
+    --accent:  #e85d04;
+    --accent2: #f48c06;
+    --text:    #e8e8e8;
+    --dim:     #777;
+    --green:   #4caf50;
+    --red:     #ff4444;
+    --blue:    #4a9eff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    padding-bottom: 60px;
+  }
+
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 22px 0 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-row { display: flex; align-items: center; gap: 14px; }
+  .logo-call { font-size: 1.7rem; font-weight: 900; letter-spacing: 3px; color: var(--accent); }
+  .admin-badge {
+    font-size: 0.62rem; font-weight: 800; letter-spacing: 2.5px;
+    background: #1a1a00; color: var(--accent2);
+    border: 1px solid #f48c0640; border-radius: 4px;
+    padding: 4px 9px; text-transform: uppercase;
+  }
+  .back-link {
+    color: var(--dim); font-size: 0.78rem; text-decoration: none;
+    letter-spacing: 1px; padding: 5px 12px;
+    border: 1px solid var(--border); border-radius: 4px;
+    transition: color .15s, border-color .15s;
+  }
+  .back-link:hover { color: var(--text); border-color: #555; }
+
+  /* ── Grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 20px;
+  }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .card-full { grid-column: 1 / -1; }
+  .card-label {
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 2.5px;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 16px;
+  }
+
+  /* ── Status strip ── */
+  .status-strip {
+    display: flex; gap: 20px; flex-wrap: wrap;
+    margin-top: 14px; font-size: 0.8rem; color: var(--dim);
+  }
+  .status-strip span { color: var(--text); font-weight: 600; }
+  .override-tag {
+    background: #1a0a00; color: var(--accent2);
+    border: 1px solid #f48c0650; border-radius: 3px;
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 1px;
+    padding: 2px 7px; margin-left: 8px; vertical-align: middle;
+  }
+
+  /* ── DJ buttons ── */
+  .dj-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+  .dj-btn {
+    padding: 10px 20px; border-radius: 6px; border: 1px solid var(--border);
+    background: #111; color: var(--text); cursor: pointer;
+    font-size: 0.85rem; font-weight: 600; letter-spacing: 0.5px;
+    transition: background .15s, border-color .15s;
+  }
+  .dj-btn:hover { background: #222; border-color: #555; }
+  .dj-btn.active {
+    background: #1a0900; border-color: var(--accent); color: var(--accent2);
+  }
+  .dj-btn.auto-btn { color: var(--dim); font-style: italic; font-weight: 400; }
+  .dj-btn.auto-btn.active { background: #001a0d; border-color: var(--green); color: var(--green); }
+
+  /* ── Song queue ── */
+  .queue-layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    height: 380px;
+    margin-top: 4px;
+  }
+  @media (max-width: 640px) {
+    .queue-layout { grid-template-columns: 1fr; height: auto; }
+    .artist-pane { height: 180px; border-right: none; border-bottom: 1px solid var(--border); }
+    .song-pane { height: 220px; }
+  }
+  .artist-pane, .song-pane {
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .artist-pane { border-right: 1px solid var(--border); }
+  .pane-header {
+    padding: 9px 12px; background: #141414;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 2px;
+    color: var(--dim); text-transform: uppercase; flex-shrink: 0;
+  }
+  .search-wrap { padding: 8px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .search-input {
+    width: 100%; background: #111; border: 1px solid var(--border);
+    color: var(--text); border-radius: 5px; padding: 6px 10px;
+    font-size: 0.82rem; outline: none;
+  }
+  .search-input:focus { border-color: #555; }
+  .list-scroll { flex: 1; overflow-y: auto; }
+  .list-scroll::-webkit-scrollbar { width: 4px; }
+  .list-scroll::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  .artist-item {
+    padding: 9px 12px; cursor: pointer; font-size: 0.84rem;
+    border-bottom: 1px solid #1e1e1e;
+    transition: background .1s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .artist-item:hover { background: #1e1e1e; }
+  .artist-item.selected { background: #1a0900; color: var(--accent2); }
+  .song-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 12px; border-bottom: 1px solid #1e1e1e;
+    gap: 10px; font-size: 0.84rem;
+  }
+  .song-item:hover { background: #1a1a1a; }
+  .song-meta { min-width: 0; }
+  .song-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song-year { font-size: 0.7rem; color: var(--accent2); }
+  .queue-btn {
+    flex-shrink: 0; padding: 5px 12px; border-radius: 5px;
+    border: 1px solid var(--accent); background: transparent;
+    color: var(--accent); font-size: 0.75rem; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.5px;
+    transition: background .15s, color .15s;
+  }
+  .queue-btn:hover { background: var(--accent); color: #fff; }
+  .empty-msg { padding: 24px 16px; color: var(--dim); font-style: italic; font-size: 0.84rem; }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: #222; border: 1px solid var(--border); color: var(--text);
+    padding: 10px 22px; border-radius: 7px; font-size: 0.85rem;
+    opacity: 0; pointer-events: none; transition: opacity .25s;
+    z-index: 100; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+  #toast.ok   { border-color: var(--green); color: var(--green); }
+  #toast.err  { border-color: var(--red);   color: var(--red); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo-row">
+      <div class="logo-call">WKRT · 104.7</div>
+      <div class="admin-badge">Admin</div>
+    </div>
+    <a href="/" class="back-link">← Back to station</a>
+  </header>
+
+  <!-- Status strip -->
+  <div class="status-strip" id="status-strip">
+    <div>On air: <span id="s-dj">—</span></div>
+    <div>Next track: <span id="s-next">—</span></div>
+    <div>Listeners: <span id="s-listeners">—</span></div>
+    <div>Engine: <span id="s-cache">—</span></div>
+  </div>
+
+  <div class="grid">
+
+    <!-- DJ Override -->
+    <div class="card">
+      <div class="card-label">DJ On Air</div>
+      <p style="font-size:.8rem;color:var(--dim);margin-bottom:14px;line-height:1.5">
+        Overrides the time-based rotation until you restore auto.
+      </p>
+      <div class="dj-grid" id="dj-btns">
+        <!-- populated by JS -->
+      </div>
+    </div>
+
+    <!-- Queue Next -->
+    <div class="card">
+      <div class="card-label">Queue Next Song</div>
+      <div class="queue-layout" id="queue-layout">
+        <div class="artist-pane">
+          <div class="search-wrap">
+            <input class="search-input" type="text" id="artist-search"
+                   placeholder="Search artists…" oninput="filterArtists(this.value)">
+          </div>
+          <div class="list-scroll" id="artist-list">
+            <div class="empty-msg">Loading library…</div>
+          </div>
+        </div>
+        <div class="song-pane">
+          <div class="pane-header">Songs</div>
+          <div class="list-scroll" id="song-list">
+            <div class="empty-msg">Select an artist</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let allArtists = [];       // [{name, tracks:[{artist,title,year}]}]
+  let selectedArtist = null;
+  let statusData = {};
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  let toastTimer;
+  function toast(msg, type = 'ok') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show ' + type;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.className = ''; }, 2800);
+  }
+
+  // ── API helpers ───────────────────────────────────────────────────────────
+  async function api(method, path, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(path, opts);
+    if (!r.ok) { const t = await r.text(); throw new Error(t || r.status); }
+    return r.json();
+  }
+
+  // ── Status polling ────────────────────────────────────────────────────────
+  async function refreshStatus() {
+    try {
+      const d = await fetch('/api/status').then(r => r.json());
+      statusData = d;
+
+      const dj = d.current_dj || '—';
+      const ovr = d.dj_override;
+      document.getElementById('s-dj').innerHTML =
+        esc(dj) + (ovr ? `<span class="override-tag">OVERRIDE</span>` : '');
+
+      const nt = d.next_track;
+      document.getElementById('s-next').textContent =
+        nt ? `${nt.artist} — ${nt.title}` : '—';
+      document.getElementById('s-listeners').textContent =
+        (d.listener_count || 0) + (d.listener_count === 1 ? ' listener' : ' listeners');
+      document.getElementById('s-cache').textContent = d.cache_state || '—';
+
+      renderDJButtons(d.dj_names || [], d.dj_override);
+    } catch(e) {}
+  }
+
+  // ── DJ buttons ────────────────────────────────────────────────────────────
+  let lastDJList = '';
+  function renderDJButtons(names, override) {
+    const key = names.join(',') + '|' + (override || '');
+    if (key === lastDJList) return;
+    lastDJList = key;
+
+    const container = document.getElementById('dj-btns');
+    container.innerHTML = '';
+
+    // Auto button
+    const autoBtn = document.createElement('button');
+    autoBtn.className = 'dj-btn auto-btn' + (!override ? ' active' : '');
+    autoBtn.textContent = '⟳ Auto (time-based)';
+    autoBtn.onclick = () => setDJOverride(null);
+    container.appendChild(autoBtn);
+
+    // One button per DJ
+    for (const name of names) {
+      const btn = document.createElement('button');
+      btn.className = 'dj-btn' + (override === name ? ' active' : '');
+      btn.textContent = name;
+      btn.onclick = () => setDJOverride(name);
+      container.appendChild(btn);
+    }
+  }
+
+  async function setDJOverride(name) {
+    try {
+      if (name) {
+        await api('POST', '/api/dj/override', { name });
+        toast(`Switched to ${name}`, 'ok');
+      } else {
+        await api('DELETE', '/api/dj/override');
+        toast('Restored auto rotation', 'ok');
+      }
+      await refreshStatus();
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  // ── Library / song queue ──────────────────────────────────────────────────
+  async function loadLibrary() {
+    try {
+      allArtists = await fetch('/api/library').then(r => r.json());
+      filterArtists('');
+    } catch(e) {
+      document.getElementById('artist-list').innerHTML =
+        '<div class="empty-msg">Failed to load library</div>';
+    }
+  }
+
+  function filterArtists(q) {
+    const lower = q.toLowerCase();
+    const filtered = q ? allArtists.filter(a => a.name.toLowerCase().includes(lower)) : allArtists;
+    const el = document.getElementById('artist-list');
+    if (!filtered.length) {
+      el.innerHTML = '<div class="empty-msg">No artists found</div>';
+      return;
+    }
+    el.innerHTML = filtered.map(a =>
+      `<div class="artist-item${selectedArtist === a.name ? ' selected' : ''}"
+            onclick="selectArtist(${JSON.stringify(a.name)})">${esc(a.name)}</div>`
+    ).join('');
+  }
+
+  function selectArtist(name) {
+    selectedArtist = name;
+    // re-render artist list to update selected highlight
+    filterArtists(document.getElementById('artist-search').value);
+
+    const artist = allArtists.find(a => a.name === name);
+    const el = document.getElementById('song-list');
+    if (!artist || !artist.tracks.length) {
+      el.innerHTML = '<div class="empty-msg">No songs</div>';
+      return;
+    }
+    el.innerHTML = artist.tracks.map(t =>
+      `<div class="song-item">
+        <div class="song-meta">
+          <div class="song-title">${esc(t.title)}</div>
+          <div class="song-year">${t.year}</div>
+        </div>
+        <button class="queue-btn"
+          onclick="queueTrack(${JSON.stringify(t.artist)},${JSON.stringify(t.title)},${t.year})">
+          Queue&nbsp;Next
+        </button>
+      </div>`
+    ).join('');
+  }
+
+  async function queueTrack(artist, title, year) {
+    try {
+      await api('POST', '/api/queue/next', { artist, title, year });
+      toast(`Queued: ${artist} — ${title}`, 'ok');
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  // ── Utility ───────────────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  refreshStatus();
+  setInterval(refreshStatus, 4000);
+  loadLibrary();
+</script>
+</body>
+</html>

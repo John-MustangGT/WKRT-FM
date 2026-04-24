@@ -77,7 +77,14 @@ class WKRTEngine:
             dj_cfg["name"]: DJEngine(self.cfg, dj_cfg)
             for dj_cfg in self._dj_configs
         }
-        self._current_dj_name: Optional[str] = None  # tracks last-seen DJ for change detection
+        self._current_dj_name: Optional[str] = None
+        self._dj_override: Optional[str] = None
+        self._dj_override_lock = threading.Lock()
+
+        # Library and forced-next track (set by admin API)
+        self._library: dict = {}
+        self._forced_next: Optional[Track] = None
+        self._forced_next_lock = threading.Lock()
 
         self.tts = TTSEngine(self.cfg)
         self.mixer = Mixer(self.cfg)
@@ -121,8 +128,10 @@ class WKRTEngine:
             )
             return
 
+        self._library = library
         year_weights = self.cfg["playlist"].get("year_weights", {})
         queue = PlaylistQueue(library, year_weights)
+        self.state.set_dj_names([d["name"] for d in self._dj_configs])
 
         console.print(
             f"[cyan]Library:[/cyan] {queue.library_size} tracks across "
@@ -142,7 +151,7 @@ class WKRTEngine:
             f"http://{ice.get('host', 'localhost')}:{self.state.stream_port}"
             f"{self.state.stream_mount}"
         )
-        WebServer(self.state, port=web_port).start()
+        WebServer(self.state, engine=self, port=web_port).start()
         console.print(f"[cyan]Web UI →[/cyan] http://0.0.0.0:{web_port}/")
 
         # Start Icecast stream
@@ -179,7 +188,12 @@ class WKRTEngine:
 
         while not self._stop.is_set():
             # Start pre-generating next segment in background
-            future_track = next(queue)
+            with self._forced_next_lock:
+                if self._forced_next is not None:
+                    future_track = self._forced_next
+                    self._forced_next = None
+                else:
+                    future_track = next(queue)
             pre_thread = threading.Thread(
                 target=self._pregenerate,
                 args=(self.next_track, future_track, seg_index),
@@ -324,6 +338,12 @@ class WKRTEngine:
 
     def active_dj_cfg(self) -> dict:
         """Return the DJ config that should be on air right now."""
+        with self._dj_override_lock:
+            override = self._dj_override
+        if override:
+            for dj_cfg in self._dj_configs:
+                if dj_cfg["name"] == override:
+                    return dj_cfg
         import datetime as _dt
         from zoneinfo import ZoneInfo
         hour = _dt.datetime.now(ZoneInfo(self.cfg["station"].get("timezone", "UTC"))).hour
@@ -335,6 +355,40 @@ class WKRTEngine:
             if block < cumulative:
                 return dj_cfg
         return self._dj_configs[0]
+
+    def set_dj_override(self, name: Optional[str]):
+        """Force a specific DJ on air, or pass None to restore time-based rotation."""
+        with self._dj_override_lock:
+            self._dj_override = name
+        self.state.set_dj_override(name)
+        log.info(f"DJ override → {name or '(auto)'}")
+
+    def force_next_track(self, track: Track):
+        """Inject a specific track to play after the current one finishes."""
+        with self._forced_next_lock:
+            self._forced_next = track
+        log.info(f"Forced next track → {track.display}")
+
+    def find_track(self, artist: str, title: str, year: int) -> Optional[Track]:
+        """Look up a Track object from the in-memory library."""
+        for tracks in self._library.values():
+            for track in tracks:
+                if track.artist == artist and track.title == title and track.year == year:
+                    return track
+        return None
+
+    def get_library_for_api(self) -> list:
+        """Return library grouped by artist, sorted, suitable for JSON serialisation."""
+        artists: dict[str, list] = {}
+        for tracks in self._library.values():
+            for t in tracks:
+                artists.setdefault(t.artist, []).append(
+                    {"artist": t.artist, "title": t.title, "year": t.year}
+                )
+        return [
+            {"name": a, "tracks": sorted(tl, key=lambda x: x["title"])}
+            for a, tl in sorted(artists.items(), key=lambda x: x[0].lower())
+        ]
 
     @property
     def dj(self) -> DJEngine:
