@@ -7,6 +7,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Optional
 
+from dotenv import load_dotenv
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:
@@ -20,6 +22,9 @@ _DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config" / "settings.toml"
 
 
 def load(path: Path = _DEFAULT_CONFIG_PATH) -> dict:
+    # Load .env file from project root
+    load_dotenv()
+    
     with open(path, "rb") as f:
         cfg = tomllib.load(f)
 

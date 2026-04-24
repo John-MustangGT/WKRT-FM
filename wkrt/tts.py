@@ -39,6 +39,7 @@ class TTSEngine:
         Synthesize text to MP3 using the backend specified in dj_cfg.
         Returns path to the cached MP3 file.
         """
+        text = self._preprocess_text(text)
         tts_cfg = dj_cfg.get("tts", {})
         backend = dj_cfg.get("tts_backend", "piper")
         voice_id = tts_cfg.get("voice_model") or tts_cfg.get("google_voice", "default")
@@ -171,3 +172,17 @@ class TTSEngine:
         ]
         subprocess.run(cmd, capture_output=True, timeout=30)
         return wav_path
+
+    def _preprocess_text(self, text: str) -> str:
+        """
+        Clean up text for TTS.
+        - Strip asterisks (often used by LLM for emphasis or stage directions)
+        - Replace 'in' endings with 'en' to avoid 'ing' artifacts in some voices
+          (e.g., 'Smokin' -> 'Smoken') as requested in GEMINI.md.
+        """
+        import re
+        # Remove asterisks
+        text = text.replace("*", "")
+        # Fix "in'" or "in " at end of words for more natural "ing" sound
+        text = re.sub(r"(\w+)in'(\W|$)", r"\1en\2", text)
+        return text.strip()
