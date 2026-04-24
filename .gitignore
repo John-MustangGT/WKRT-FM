@@ -1,4 +1,5 @@
 config/settings.toml
+config/google-creds.json
 .env
 .claude/
 __pycache__/
