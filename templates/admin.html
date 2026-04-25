@@ -190,6 +190,58 @@
   .kick-btn:hover { background: var(--red); color: #fff; }
   .no-listeners { color: var(--dim); font-style: italic; font-size: 0.84rem; padding: 12px 2px; }
 
+  /* ── Live context ── */
+  .context-textarea {
+    width: 100%; background: #111; border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 10px 12px;
+    font-size: 0.85rem; line-height: 1.5; resize: vertical; min-height: 72px;
+    outline: none; font-family: inherit;
+  }
+  .context-textarea:focus { border-color: #555; }
+  .context-row {
+    display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap;
+  }
+  .context-row label { display: flex; align-items: center; gap: 6px;
+    font-size: 0.8rem; color: var(--dim); cursor: pointer; }
+  .context-active {
+    font-size: 0.75rem; color: var(--accent2); background: #1a0900;
+    border: 1px solid #f48c0640; border-radius: 4px; padding: 3px 9px;
+    display: none;
+  }
+  .context-active.visible { display: inline-block; }
+
+  /* ── Streaming targets ── */
+  .target-table {
+    width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 4px;
+  }
+  .target-table th {
+    text-align: left; padding: 7px 10px; color: var(--dim);
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .target-table td { padding: 8px 10px; border-bottom: 1px solid #1c1c1c; vertical-align: middle; }
+  .target-table tr:last-child td { border-bottom: none; }
+  .target-name { font-weight: 600; }
+  .target-addr { font-family: monospace; font-size: 0.75rem; color: var(--dim); }
+  .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+  }
+  .dot-green { background: var(--green); }
+  .dot-red   { background: var(--red); }
+  .dot-yellow { background: var(--accent2); }
+  .target-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tgt-btn {
+    padding: 4px 10px; border-radius: 4px; font-size: 0.72rem; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.5px; transition: background .15s, color .15s;
+  }
+  .tgt-btn-enable  { border: 1px solid var(--green);  background: transparent; color: var(--green); }
+  .tgt-btn-enable:hover  { background: var(--green);  color: #000; }
+  .tgt-btn-disable { border: 1px solid var(--red);    background: transparent; color: var(--red); }
+  .tgt-btn-disable:hover { background: var(--red);    color: #fff; }
+  .tgt-btn-restart { border: 1px solid var(--blue);   background: transparent; color: var(--blue); }
+  .tgt-btn-restart:hover { background: var(--blue);   color: #fff; }
+
   /* ── Toast ── */
   #toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -233,6 +285,11 @@
       <div class="dj-grid" id="dj-btns">
         <!-- populated by JS -->
       </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+        <button class="dj-btn" id="dj-restart-btn" onclick="restartDJ()" style="color:var(--blue);border-color:var(--blue);">
+          ↺ Force DJ Break
+        </button>
+      </div>
     </div>
 
     <!-- Queue Next -->
@@ -254,6 +311,37 @@
             <div class="empty-msg">Select an artist</div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Live Context Injection -->
+    <div class="card card-full">
+      <div class="card-label">Live Context — Breaking News</div>
+      <p style="font-size:.8rem;color:var(--dim);margin-bottom:12px;line-height:1.5">
+        Injected into the next DJ break. The DJ will work it in naturally as something live and immediate.
+      </p>
+      <textarea class="context-textarea" id="context-text"
+        placeholder="e.g. &quot;There's a massive snowstorm hitting the city right now&quot; or &quot;Go Sox! Red Sox just walked off in the 9th.&quot;"></textarea>
+      <div class="context-row">
+        <label>
+          <input type="checkbox" id="context-oneshot">
+          One-shot (clear after next break)
+        </label>
+        <button class="dj-btn" onclick="injectContext()" style="color:var(--accent2);border-color:var(--accent2);">
+          Inject
+        </button>
+        <button class="dj-btn" onclick="clearContext()" style="color:var(--dim);">
+          Clear
+        </button>
+        <span class="context-active" id="context-active">LIVE CONTEXT SET</span>
+      </div>
+    </div>
+
+    <!-- Streaming Targets -->
+    <div class="card card-full">
+      <div class="card-label">Streaming Targets</div>
+      <div id="targets-panel">
+        <div class="no-listeners">Loading…</div>
       </div>
     </div>
 
@@ -313,6 +401,7 @@
       document.getElementById('s-cache').textContent = d.cache_state || '—';
 
       renderDJButtons(d.dj_names || [], d.dj_override);
+      _updateContextBadge(d);
     } catch(e) {}
   }
 
@@ -481,11 +570,113 @@
     } catch(e) { toast('Kick failed: ' + e.message, 'err'); }
   }
 
+  // ── Live context ──────────────────────────────────────────────────────────
+  function _updateContextBadge(d) {
+    const badge = document.getElementById('context-active');
+    if (d && d.live_context) {
+      badge.classList.add('visible');
+      badge.textContent = d.context_one_shot ? 'LIVE CONTEXT (one-shot)' : 'LIVE CONTEXT SET';
+    } else {
+      badge.classList.remove('visible');
+    }
+  }
+
+  async function injectContext() {
+    const text = document.getElementById('context-text').value.trim();
+    if (!text) return toast('Enter some context text first', 'err');
+    const one_shot = document.getElementById('context-oneshot').checked;
+    try {
+      await api('POST', '/api/context', { text, one_shot });
+      toast('Context injected — hits on the next DJ break', 'ok');
+      _updateContextBadge({ live_context: text, context_one_shot: one_shot });
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  async function clearContext() {
+    try {
+      await api('POST', '/api/context', { text: '', one_shot: false });
+      document.getElementById('context-text').value = '';
+      document.getElementById('context-oneshot').checked = false;
+      toast('Context cleared', 'ok');
+      _updateContextBadge({});
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  // ── DJ restart ────────────────────────────────────────────────────────────
+  async function restartDJ() {
+    try {
+      await api('POST', '/api/dj/restart');
+      toast('DJ break queued for next track', 'ok');
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  // ── Streaming targets ─────────────────────────────────────────────────────
+  function _statusDot(t) {
+    if (!t.enabled)      return `<span class="dot dot-red"   title="Disabled"></span>Disabled`;
+    if (t.reconnecting)  return `<span class="dot dot-yellow" title="Reconnecting…"></span>Reconnecting…`;
+    if (t.connected)     return `<span class="dot dot-green"  title="Live"></span>Live`;
+    return                      `<span class="dot dot-red"   title="Disconnected"></span>Disconnected`;
+  }
+
+  async function refreshTargets() {
+    try {
+      const targets = await fetch('/api/targets').then(r => r.json());
+      const panel = document.getElementById('targets-panel');
+      if (!targets.length) {
+        panel.innerHTML = '<div class="no-listeners">No streaming targets configured</div>';
+        return;
+      }
+      panel.innerHTML = `
+        <table class="target-table">
+          <thead><tr>
+            <th>Name</th><th>Address</th><th>Codec / Bitrate</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody>${targets.map(t => {
+            const addr = `${esc(t.host)}:${t.port}${esc(t.mount)}`;
+            const codec = t.codec === 'opus'
+              ? `Opus ${t.bitrate || 96}k`
+              : t.bitrate ? `MP3 ${t.bitrate}k` : 'MP3 (copy)';
+            return `<tr>
+              <td><span class="target-name">${esc(t.name)}</span></td>
+              <td><span class="target-addr">${addr}</span></td>
+              <td style="font-size:.78rem;color:var(--dim)">${codec}</td>
+              <td>${_statusDot(t)}</td>
+              <td><div class="target-btns">
+                ${t.enabled
+                  ? `<button class="tgt-btn tgt-btn-disable" data-idx="${t.idx}" data-action="disable">Disable</button>`
+                  : `<button class="tgt-btn tgt-btn-enable"  data-idx="${t.idx}" data-action="enable">Enable</button>`}
+                <button class="tgt-btn tgt-btn-restart" data-idx="${t.idx}" data-action="restart">Restart</button>
+              </div></td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table>`;
+    } catch(e) {
+      document.getElementById('targets-panel').innerHTML =
+        '<div class="no-listeners">Could not load targets</div>';
+    }
+  }
+
+  document.addEventListener('click', async e => {
+    const btn = e.target.closest('[data-action][data-idx]');
+    if (!btn) return;
+    const idx    = btn.dataset.idx;
+    const action = btn.dataset.action;
+    if (!['enable','disable','restart'].includes(action)) return;
+    try {
+      await api('POST', `/api/targets/${idx}/${action}`);
+      toast(`Target ${action}d`, 'ok');
+      setTimeout(refreshTargets, 400);
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  });
+
   // ── Init ──────────────────────────────────────────────────────────────────
   refreshStatus();
   setInterval(refreshStatus, 4000);
   refreshListeners();
   setInterval(refreshListeners, 5000);
+  refreshTargets();
+  setInterval(refreshTargets, 8000);
   loadLibrary();
 </script>
 </body>

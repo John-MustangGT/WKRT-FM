@@ -97,6 +97,9 @@ class WKRTEngine:
         self._targets: list[dict] = self._load_targets()
         self._stream_procs: list[Optional[subprocess.Popen]] = [None] * len(self._targets)
         self._reconnecting: set[int] = set()
+        self._target_enabled: list[bool] = [True] * len(self._targets)
+
+        self._force_dj = threading.Event()
 
         self._listener_count = 0
         self._connect_id_pending = threading.Event()
@@ -277,8 +280,12 @@ class WKRTEngine:
 
         # Crate tracks always get a DJ announcement regardless of the normal cadence
         crate_incoming = bool(next_track and next_track.from_crate)
+        force_dj = self._force_dj.is_set()
+        if force_dj:
+            self._force_dj.clear()
         insert_dj = listeners_present and (
-            crate_incoming
+            force_dj
+            or crate_incoming
             or (self.dj_every > 0 and self.track_count % self.dj_every == 0)
         )
 
@@ -288,11 +295,18 @@ class WKRTEngine:
                 force_type = ClipType.NEW_ARRIVAL if crate_incoming else None
                 if crate_incoming:
                     next_track.from_crate = False  # consumed — won't re-trigger on replay
+
+                ctx = self.context.get() or {}
+                live = self.state.pop_live_context()
+                if live:
+                    ctx = dict(ctx)
+                    ctx["live_context"] = live
+
                 script = active_engine.generate(
                     prev_track=track,
                     next_track=next_track,
                     force_type=force_type,
-                    context=self.context.get(),
+                    context=ctx,
                 )
                 self._print_dj(script.text, dj_cfg["name"])
                 dj_text = script.text
@@ -326,10 +340,20 @@ class WKRTEngine:
         """Start one persistent ffmpeg process for the given target."""
         url = self._target_url(target)
         station = self.cfg["station"]
+        codec = target.get("codec", "mp3").lower()
+        bitrate = target.get("bitrate")
+
+        if codec == "opus":
+            audio_args = ["-c:a", "libopus", "-b:a", f"{bitrate or 96}k", "-f", "ogg"]
+        elif bitrate:
+            audio_args = ["-c:a", "libmp3lame", "-b:a", f"{bitrate}k", "-f", "mp3"]
+        else:
+            audio_args = ["-c:a", "copy", "-f", "mp3"]
+
         cmd = [
             "ffmpeg", "-loglevel", "warning",
             "-re", "-f", "mp3", "-i", "pipe:0",
-            "-c:a", "copy", "-f", "mp3",
+            *audio_args,
             "-ice_name", f"{station['call_sign']}-FM {station['frequency']}",
             "-ice_description", station.get("tagline", ""),
             "-ice_genre", "Classic Rock",
@@ -350,6 +374,8 @@ class WKRTEngine:
 
     def _start_all_streams(self):
         for i, target in enumerate(self._targets):
+            if not self._target_enabled[i]:
+                continue
             proc = self._start_stream(target)
             self._stream_procs[i] = proc
             label = target.get("name", target.get("host", str(i)))
@@ -361,9 +387,11 @@ class WKRTEngine:
 
     def _ensure_all_streams(self) -> bool:
         """Return True if at least one stream is live. Kick off background reconnects
-        for any dead targets (without blocking the main loop)."""
+        for any dead enabled targets (without blocking the main loop)."""
         any_live = False
         for i, proc in enumerate(self._stream_procs):
+            if not self._target_enabled[i]:
+                continue
             if proc and proc.poll() is None:
                 any_live = True
             elif i not in self._reconnecting:
@@ -380,11 +408,13 @@ class WKRTEngine:
         target = self._targets[idx]
         name = target.get("name", target.get("host", str(idx)))
         for attempt in range(12):
-            if self._stop.is_set():
+            if self._stop.is_set() or not self._target_enabled[idx]:
                 break
             wait = min(60, 5 * (attempt + 1))
             log.warning(f"Stream '{name}' down — reconnecting in {wait}s (attempt {attempt + 1})")
             time.sleep(wait)
+            if not self._target_enabled[idx]:
+                break
             proc = self._start_stream(target)
             if proc and proc.poll() is None:
                 self._stream_procs[idx] = proc
@@ -393,6 +423,58 @@ class WKRTEngine:
         else:
             log.error(f"Stream '{name}' could not reconnect after retries")
         self._reconnecting.discard(idx)
+
+    # ── Target runtime controls ───────────────────────────────────────────────
+
+    def target_statuses(self) -> list[dict]:
+        """Return a snapshot of each target's current state for the admin API."""
+        result = []
+        for i, target in enumerate(self._targets):
+            proc = self._stream_procs[i]
+            result.append({
+                "idx": i,
+                "name": target.get("name", f"target-{i}"),
+                "host": target.get("host", ""),
+                "port": target.get("port", 8000),
+                "mount": target.get("mount", "/wkrt"),
+                "codec": target.get("codec", "mp3"),
+                "bitrate": target.get("bitrate"),
+                "enabled": self._target_enabled[i],
+                "connected": bool(proc and proc.poll() is None),
+                "reconnecting": i in self._reconnecting,
+            })
+        return result
+
+    def enable_target(self, idx: int):
+        if 0 <= idx < len(self._targets):
+            self._target_enabled[idx] = True
+            proc = self._stream_procs[idx]
+            if not (proc and proc.poll() is None) and idx not in self._reconnecting:
+                proc = self._start_stream(self._targets[idx])
+                self._stream_procs[idx] = proc
+            log.info(f"Target {idx} enabled")
+
+    def disable_target(self, idx: int):
+        if 0 <= idx < len(self._targets):
+            self._target_enabled[idx] = False
+            self._reconnecting.discard(idx)
+            proc = self._stream_procs[idx]
+            if proc:
+                try:
+                    proc.stdin.close()
+                    proc.wait(timeout=3)
+                except Exception:
+                    proc.kill()
+                self._stream_procs[idx] = None
+            log.info(f"Target {idx} disabled")
+
+    def restart_target(self, idx: int):
+        if 0 <= idx < len(self._targets):
+            self.disable_target(idx)
+            self._target_enabled[idx] = True
+            proc = self._start_stream(self._targets[idx])
+            self._stream_procs[idx] = proc
+            log.info(f"Target {idx} restarted")
 
     # ── DJ rotation ───────────────────────────────────────────────────────────
 
@@ -422,6 +504,11 @@ class WKRTEngine:
             self._dj_override = name
         self.state.set_dj_override(name)
         log.info(f"DJ override → {name or '(auto)'}")
+
+    def force_dj_break(self):
+        """Force a DJ clip into the next segment regardless of normal cadence."""
+        self._force_dj.set()
+        log.info("DJ break forced by admin")
 
     def force_next_track(self, track: Track):
         """Inject a specific track to play after the current one finishes."""

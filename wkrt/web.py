@@ -8,14 +8,21 @@ Routes:
   GET  /api/library   → JSON artist/track library
   POST /api/dj/override        body: {"name": "Neon"}  [auth required]
   DELETE /api/dj/override      [auth required]
+  POST /api/dj/restart         [auth required]
   POST /api/queue/next         body: {"artist":…, "title":…, "year":…}  [auth required]
   GET  /api/listeners          → JSON list of Icecast clients  [auth required]
   POST /api/listeners/kick     body: {"id": "5"}  [auth required]
   POST /api/library/ingest     body: {"paths": [...]}  [auth required]
+  POST /api/context            body: {"text": "…", "one_shot": false}  [auth required]
+  GET  /api/targets            → JSON list of streaming target statuses  [auth required]
+  POST /api/targets/{idx}/enable    [auth required]
+  POST /api/targets/{idx}/disable   [auth required]
+  POST /api/targets/{idx}/restart   [auth required]
 """
 import base64
 import json
 import logging
+import re
 import threading
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -80,6 +87,11 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             clients = self._icecast_list_clients()
             self._respond(200, "application/json", json.dumps(clients).encode())
+        elif self.path == "/api/targets":
+            if not self._require_admin():
+                return
+            statuses = self.engine.target_statuses() if self.engine else []
+            self._respond(200, "application/json", json.dumps(statuses).encode())
         else:
             self._respond(404, "text/plain", b"Not found")
 
@@ -141,8 +153,38 @@ class _Handler(BaseHTTPRequestHandler):
                                "tracks": [t.display for t in added]}).encode()
             self._respond(200, "application/json", data)
 
+        elif self.path == "/api/dj/restart":
+            if not self.engine:
+                return self._respond(503, "text/plain", b"Engine not available")
+            self.engine.force_dj_break()
+            self._respond(200, "application/json", b'{"ok":true}')
+
+        elif self.path == "/api/context":
+            try:
+                req = json.loads(body)
+                text = str(req.get("text", "")).strip()
+                one_shot = bool(req.get("one_shot", False))
+            except (ValueError, AttributeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need text")
+            self.state.set_live_context(text, one_shot)
+            self._respond(200, "application/json", b'{"ok":true}')
+
         else:
-            self._respond(404, "text/plain", b"Not found")
+            m = re.match(r'^/api/targets/(\d+)/(enable|disable|restart)$', self.path)
+            if m and self.engine:
+                idx = int(m.group(1))
+                action = m.group(2)
+                if idx >= len(self.engine._targets):
+                    return self._respond(404, "text/plain", b"Target index out of range")
+                if action == "enable":
+                    self.engine.enable_target(idx)
+                elif action == "disable":
+                    self.engine.disable_target(idx)
+                elif action == "restart":
+                    self.engine.restart_target(idx)
+                self._respond(200, "application/json", b'{"ok":true}')
+            else:
+                self._respond(404, "text/plain", b"Not found")
 
     # ── DELETE ────────────────────────────────────────────────────────────────
 

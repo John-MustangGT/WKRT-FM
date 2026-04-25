@@ -235,6 +235,12 @@ class DJEngine:
                 "don't force it every time:\n" + "\n".join(ctx_lines)
             )
 
+        if context and context.get("live_context"):
+            prompt += (
+                "\n\nBREAKING — work this into your next break, make it feel live and immediate:\n"
+                + context["live_context"]
+            )
+
         return prompt
 
     def _call_api(self, prompt: str) -> str:

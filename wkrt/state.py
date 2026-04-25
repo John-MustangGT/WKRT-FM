@@ -22,6 +22,8 @@ class StationState:
         self.stream_port = 8000
         self.stream_mount = "/wkrt"
         self.started_at = datetime.now().isoformat()
+        self.live_context: str = ""
+        self.context_one_shot: bool = False
 
     def set_now_playing(self, track, next_track=None):
         with self._lock:
@@ -59,6 +61,20 @@ class StationState:
         with self._lock:
             self.cache_state = name
 
+    def set_live_context(self, text: str, one_shot: bool = False):
+        with self._lock:
+            self.live_context = text
+            self.context_one_shot = one_shot
+
+    def pop_live_context(self) -> str:
+        """Return current live context; clear it if one-shot."""
+        with self._lock:
+            text = self.live_context
+            if text and self.context_one_shot:
+                self.live_context = ""
+                self.context_one_shot = False
+            return text
+
     def to_dict(self) -> dict:
         with self._lock:
             t = self.current_track
@@ -86,4 +102,6 @@ class StationState:
                 "stream_port": self.stream_port,
                 "stream_mount": self.stream_mount,
                 "started_at": self.started_at,
+                "live_context": self.live_context,
+                "context_one_shot": self.context_one_shot,
             }
