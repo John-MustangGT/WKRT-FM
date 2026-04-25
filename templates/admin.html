@@ -148,16 +148,15 @@
   .artist-item:hover { background: #1e1e1e; }
   .artist-item.selected { background: #1a0900; color: var(--accent2); }
   .song-item {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 9px 12px; border-bottom: 1px solid #1e1e1e;
-    gap: 10px; font-size: 0.84rem;
+    display: flex; flex-direction: column; align-items: stretch;
+    padding: 9px 12px; border-bottom: 1px solid #1e1e1e; font-size: 0.84rem;
   }
   .song-item:hover { background: #1a1a1a; }
-  .song-meta { min-width: 0; }
   .song-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song-row2 { display: flex; align-items: center; justify-content: space-between; margin-top: 5px; }
   .song-year { font-size: 0.7rem; color: var(--accent2); }
   .queue-btn {
-    flex-shrink: 0; padding: 5px 12px; border-radius: 5px;
+    padding: 5px 12px; border-radius: 5px;
     border: 1px solid var(--accent); background: transparent;
     color: var(--accent); font-size: 0.75rem; font-weight: 700;
     cursor: pointer; letter-spacing: 0.5px;
@@ -165,6 +164,31 @@
   }
   .queue-btn:hover { background: var(--accent); color: #fff; }
   .empty-msg { padding: 24px 16px; color: var(--dim); font-style: italic; font-size: 0.84rem; }
+
+  /* ── Listeners table ── */
+  .listener-table {
+    width: 100%; border-collapse: collapse; margin-top: 4px; font-size: 0.82rem;
+  }
+  .listener-table th {
+    text-align: left; padding: 7px 10px; color: var(--dim);
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+  .listener-table td {
+    padding: 8px 10px; border-bottom: 1px solid #1c1c1c; vertical-align: middle;
+  }
+  .listener-table tr:last-child td { border-bottom: none; }
+  .listener-ip { font-family: monospace; color: var(--accent2); font-size: 0.85rem; }
+  .listener-ua { color: var(--dim); font-size: 0.75rem; max-width: 260px;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .listener-dur { color: var(--dim); font-size: 0.75rem; white-space: nowrap; }
+  .kick-btn {
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--red);
+    background: transparent; color: var(--red); font-size: 0.72rem; font-weight: 700;
+    cursor: pointer; letter-spacing: 0.5px; transition: background .15s, color .15s;
+  }
+  .kick-btn:hover { background: var(--red); color: #fff; }
+  .no-listeners { color: var(--dim); font-style: italic; font-size: 0.84rem; padding: 12px 2px; }
 
   /* ── Toast ── */
   #toast {
@@ -230,6 +254,14 @@
             <div class="empty-msg">Select an artist</div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Connected Listeners -->
+    <div class="card card-full">
+      <div class="card-label">Connected Listeners</div>
+      <div id="listener-panel">
+        <div class="no-listeners">Loading…</div>
       </div>
     </div>
 
@@ -343,15 +375,21 @@
       el.innerHTML = '<div class="empty-msg">No artists found</div>';
       return;
     }
+    // Use data-name to avoid double-quote collisions with JSON.stringify inside onclick=""
     el.innerHTML = filtered.map(a =>
       `<div class="artist-item${selectedArtist === a.name ? ' selected' : ''}"
-            onclick="selectArtist(${JSON.stringify(a.name)})">${esc(a.name)}</div>`
+            data-name="${esc(a.name)}">${esc(a.name)}</div>`
     ).join('');
   }
 
+  // Delegated click — avoids all attribute-quoting issues
+  document.getElementById('artist-list').addEventListener('click', e => {
+    const item = e.target.closest('.artist-item');
+    if (item) selectArtist(item.dataset.name);
+  });
+
   function selectArtist(name) {
     selectedArtist = name;
-    // re-render artist list to update selected highlight
     filterArtists(document.getElementById('artist-search').value);
 
     const artist = allArtists.find(a => a.name === name);
@@ -362,17 +400,24 @@
     }
     el.innerHTML = artist.tracks.map(t =>
       `<div class="song-item">
-        <div class="song-meta">
-          <div class="song-title">${esc(t.title)}</div>
-          <div class="song-year">${t.year}</div>
+        <div class="song-title">${esc(t.title)}</div>
+        <div class="song-row2">
+          <span class="song-year">${t.year}</span>
+          <button class="queue-btn"
+            data-artist="${esc(t.artist)}"
+            data-title="${esc(t.title)}"
+            data-year="${t.year}">
+            Queue&nbsp;Next
+          </button>
         </div>
-        <button class="queue-btn"
-          onclick="queueTrack(${JSON.stringify(t.artist)},${JSON.stringify(t.title)},${t.year})">
-          Queue&nbsp;Next
-        </button>
       </div>`
     ).join('');
   }
+
+  document.getElementById('song-list').addEventListener('click', e => {
+    const btn = e.target.closest('.queue-btn');
+    if (btn) queueTrack(btn.dataset.artist, btn.dataset.title, parseInt(btn.dataset.year, 10));
+  });
 
   async function queueTrack(artist, title, year) {
     try {
@@ -388,9 +433,59 @@
       .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // ── Listeners ─────────────────────────────────────────────────────────────
+  function fmtDuration(secs) {
+    secs = parseInt(secs, 10) || 0;
+    const m = Math.floor(secs / 60), s = secs % 60;
+    return m ? `${m}m ${s}s` : `${s}s`;
+  }
+
+  async function refreshListeners() {
+    try {
+      const clients = await fetch('/api/listeners').then(r => r.json());
+      const panel = document.getElementById('listener-panel');
+      if (!clients.length) {
+        panel.innerHTML = '<div class="no-listeners">No listeners connected</div>';
+        return;
+      }
+      panel.innerHTML = `
+        <table class="listener-table">
+          <thead><tr>
+            <th>IP</th><th>User Agent</th><th>Connected</th><th></th>
+          </tr></thead>
+          <tbody>${clients.map(c => `
+            <tr>
+              <td><span class="listener-ip">${esc(c.ip)}</span></td>
+              <td><span class="listener-ua" title="${esc(c.useragent)}">${esc(c.useragent)}</span></td>
+              <td><span class="listener-dur">${fmtDuration(c.connected_seconds)}</span></td>
+              <td><button class="kick-btn" data-id="${esc(c.id)}" data-ip="${esc(c.ip)}">Kick</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+    } catch(e) {
+      document.getElementById('listener-panel').innerHTML =
+        '<div class="no-listeners">Could not reach Icecast admin API</div>';
+    }
+  }
+
+  document.getElementById('listener-panel').addEventListener('click', e => {
+    const btn = e.target.closest('.kick-btn');
+    if (btn) kickListener(btn.dataset.id, btn.dataset.ip);
+  });
+
+  async function kickListener(id, ip) {
+    try {
+      await api('POST', '/api/listeners/kick', { id });
+      toast(`Kicked ${ip}`, 'ok');
+      setTimeout(refreshListeners, 600);
+    } catch(e) { toast('Kick failed: ' + e.message, 'err'); }
+  }
+
   // ── Init ──────────────────────────────────────────────────────────────────
   refreshStatus();
   setInterval(refreshStatus, 4000);
+  refreshListeners();
+  setInterval(refreshListeners, 5000);
   loadLibrary();
 </script>
 </body>

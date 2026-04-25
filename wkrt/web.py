@@ -3,18 +3,23 @@ wkrt/web.py — Station web UI and status API.
 
 Routes:
   GET  /              → index.html (listener view)
-  GET  /admin         → admin.html (DJ/queue control)
+  GET  /admin         → admin.html (DJ/queue control)  [auth required]
   GET  /api/status    → JSON station state
   GET  /api/library   → JSON artist/track library
-  POST /api/dj/override        body: {"name": "Neon"}  — force a DJ
-  DELETE /api/dj/override      — restore time-based rotation
-  POST /api/queue/next         body: {"artist":…, "title":…, "year":…}
+  POST /api/dj/override        body: {"name": "Neon"}  [auth required]
+  DELETE /api/dj/override      [auth required]
+  POST /api/queue/next         body: {"artist":…, "title":…, "year":…}  [auth required]
+  GET  /api/listeners          → JSON list of Icecast clients  [auth required]
+  POST /api/listeners/kick     body: {"id": "5"}  [auth required]
 """
+import base64
 import json
 import logging
 import threading
+import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +29,32 @@ _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 class _Handler(BaseHTTPRequestHandler):
     state = None
     engine = None
+    _admin_password = ""   # empty = no auth required
+    _ice_cfg: dict = {}
+
+    # ── Auth ─────────────────────────────────────────────────────────────────
+
+    def _require_admin(self) -> bool:
+        pw = self.__class__._admin_password
+        if not pw:
+            return True
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Basic "):
+            try:
+                creds = base64.b64decode(auth[6:]).decode()
+                _, given = creds.split(":", 1)
+                if given == pw:
+                    return True
+            except Exception:
+                pass
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="WKRT Admin"')
+        self.send_header("Content-Type", "text/plain")
+        body = b"Unauthorized"
+        self.send_header("Content-Length", len(body))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
 
     # ── GET ──────────────────────────────────────────────────────────────────
 
@@ -31,6 +62,8 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/":
             self._serve_file(_TEMPLATE_DIR / "index.html", "text/html; charset=utf-8")
         elif self.path == "/admin":
+            if not self._require_admin():
+                return
             self._serve_file(_TEMPLATE_DIR / "admin.html", "text/html; charset=utf-8")
         elif self.path == "/api/status":
             data = json.dumps(self.state.to_dict() if self.state else {})
@@ -41,12 +74,19 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 data = "[]"
             self._respond(200, "application/json", data.encode())
+        elif self.path == "/api/listeners":
+            if not self._require_admin():
+                return
+            clients = self._icecast_list_clients()
+            self._respond(200, "application/json", json.dumps(clients).encode())
         else:
             self._respond(404, "text/plain", b"Not found")
 
     # ── POST ─────────────────────────────────────────────────────────────────
 
     def do_POST(self):
+        if not self._require_admin():
+            return
         body = self._read_body()
 
         if self.path == "/api/dj/override":
@@ -77,12 +117,25 @@ class _Handler(BaseHTTPRequestHandler):
             self.engine.force_next_track(track)
             self._respond(200, "application/json", b'{"ok":true}')
 
+        elif self.path == "/api/listeners/kick":
+            try:
+                client_id = str(json.loads(body)["id"])
+            except (ValueError, KeyError, TypeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need id")
+            ok = self._icecast_kick_client(client_id)
+            if ok:
+                self._respond(200, "application/json", b'{"ok":true}')
+            else:
+                self._respond(502, "text/plain", b"Icecast kick failed")
+
         else:
             self._respond(404, "text/plain", b"Not found")
 
     # ── DELETE ────────────────────────────────────────────────────────────────
 
     def do_DELETE(self):
+        if not self._require_admin():
+            return
         if self.path == "/api/dj/override":
             if not self.engine:
                 return self._respond(503, "text/plain", b"Engine not available")
@@ -111,14 +164,66 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # ── Icecast admin helpers ─────────────────────────────────────────────────
+
+    def _icecast_list_clients(self) -> list:
+        ice = self.__class__._ice_cfg
+        if not ice:
+            return []
+        host = ice.get("host", "localhost")
+        port = ice.get("port", 8000)
+        mount = ice.get("mount", "/wkrt")
+        pw = ice.get("admin_password", "hackme")
+        url = f"http://{host}:{port}/admin/listclients?mount={mount}"
+        creds = base64.b64encode(f"admin:{pw}".encode()).decode()
+        try:
+            req = Request(url, headers={"Authorization": f"Basic {creds}"})
+            with urlopen(req, timeout=3) as resp:
+                xml_data = resp.read()
+            root = ET.fromstring(xml_data)
+            clients = []
+            for listener in root.findall(".//listener"):
+                secs = int(listener.findtext("Connected", "0") or 0)
+                clients.append({
+                    "id": listener.findtext("ID", ""),
+                    "ip": listener.findtext("IP", ""),
+                    "useragent": listener.findtext("UserAgent", ""),
+                    "connected_seconds": secs,
+                })
+            return clients
+        except Exception as e:
+            log.debug(f"Icecast listclients failed: {e}")
+            return []
+
+    def _icecast_kick_client(self, client_id: str) -> bool:
+        ice = self.__class__._ice_cfg
+        if not ice:
+            return False
+        host = ice.get("host", "localhost")
+        port = ice.get("port", 8000)
+        mount = ice.get("mount", "/wkrt")
+        pw = ice.get("admin_password", "hackme")
+        url = f"http://{host}:{port}/admin/killclient?mount={mount}&id={client_id}"
+        creds = base64.b64encode(f"admin:{pw}".encode()).decode()
+        try:
+            req = Request(url, headers={"Authorization": f"Basic {creds}"})
+            with urlopen(req, timeout=3):
+                return True
+        except Exception as e:
+            log.debug(f"Icecast killclient failed: {e}")
+            return False
+
     def log_message(self, fmt, *args):
         pass  # suppress per-request logging
 
 
 class WebServer:
-    def __init__(self, state, engine=None, host: str = "0.0.0.0", port: int = 8080):
+    def __init__(self, state, engine=None, host: str = "0.0.0.0", port: int = 8080,
+                 admin_password: str = "", ice_cfg: dict = None):
         _Handler.state = state
         _Handler.engine = engine
+        _Handler._admin_password = admin_password
+        _Handler._ice_cfg = ice_cfg or {}
         self._server = HTTPServer((host, port), _Handler)
         self._port = port
 

@@ -111,8 +111,8 @@ class WKRTEngine:
             port=hook_port,
         )
 
-        # Pre-generation thread — stores (segment_path, dj_starts_at) tuple
-        self._next_segment: Optional[tuple[Path, Optional[float]]] = None
+        # Pre-generation thread — stores (segment_path, dj_starts_at, dj_text) tuple
+        self._next_segment: Optional[tuple[Path, Optional[float], str]] = None
         self._next_segment_ready = threading.Event()
         self._next_segment_lock = threading.Lock()
 
@@ -151,7 +151,12 @@ class WKRTEngine:
             f"http://{ice.get('host', 'localhost')}:{self.state.stream_port}"
             f"{self.state.stream_mount}"
         )
-        WebServer(self.state, engine=self, port=web_port).start()
+        web_admin_pw = web_cfg.get("admin_password", "")
+        WebServer(
+            self.state, engine=self, port=web_port,
+            admin_password=web_admin_pw,
+            ice_cfg=self.cfg.get("icecast", {}),
+        ).start()
         console.print(f"[cyan]Web UI →[/cyan] http://0.0.0.0:{web_port}/")
 
         # Start Icecast stream
@@ -180,7 +185,7 @@ class WKRTEngine:
         seg_index = 0
 
         # Pre-generate first segment synchronously so we start immediately
-        first_segment, first_dj_at = self._build_segment(
+        first_segment, first_dj_at, first_dj_text = self._build_segment(
             self.current_track, self.next_track, seg_index
         )
         seg_index += 1
@@ -201,7 +206,10 @@ class WKRTEngine:
             )
             pre_thread.start()
 
-            # Play current segment
+            # Play current segment — update DJ script text at play time so the
+            # website reflects what's actually being heard, not what was pre-generated
+            if first_dj_text:
+                self.state.set_dj_script(first_dj_text)
             self._play(first_segment, self.current_track, first_dj_at)
 
             # Inject connect ID at the next natural break if a listener just tuned in
@@ -226,9 +234,9 @@ class WKRTEngine:
             pre_thread.join(timeout=120)
             with self._next_segment_lock:
                 if self._next_segment is not None:
-                    first_segment, first_dj_at = self._next_segment
+                    first_segment, first_dj_at, first_dj_text = self._next_segment
                 else:
-                    first_segment, first_dj_at = self._build_segment(
+                    first_segment, first_dj_at, first_dj_text = self._build_segment(
                         self.current_track, self.next_track, seg_index
                     )
                 self._next_segment = None
@@ -238,21 +246,22 @@ class WKRTEngine:
                 self.mixer.cleanup_spool(keep=15)
 
     def _pregenerate(self, current: Track, next_t: Track, idx: int):
-        seg, dj_at = self._build_segment(current, next_t, idx)
+        result = self._build_segment(current, next_t, idx)
         with self._next_segment_lock:
-            self._next_segment = (seg, dj_at)
+            self._next_segment = result
 
     def _build_segment(
         self, track: Track, next_track: Optional[Track], idx: int
-    ) -> tuple[Path, Optional[float]]:
+    ) -> tuple[Path, Optional[float], str]:
         """Build a single playable segment: track + optional DJ clip.
-        Returns (segment_path, dj_starts_at) where dj_starts_at is seconds into
-        the segment when the DJ begins speaking, or None if no DJ clip."""
+        Returns (segment_path, dj_starts_at, dj_text) where dj_starts_at is seconds
+        into the segment when the DJ begins speaking, or None if no DJ clip."""
         dj_cfg = self.active_dj_cfg()
         self._maybe_announce_dj_change(dj_cfg)
 
         segment_name = f"seg_{idx:06d}_{track.year}_{self._safe_name(track.artist)}"
         dj_clip_path: Optional[Path] = None
+        dj_text = ""
 
         # Skip DJ when nobody is listening (saves API credits)
         from .cache import CacheState
@@ -273,12 +282,13 @@ class WKRTEngine:
                     context=self.context.get(),
                 )
                 self._print_dj(script.text, dj_cfg["name"])
-                self.state.set_dj_script(script.text)
+                dj_text = script.text
                 dj_clip_path = self.tts.synthesize(script.text, dj_cfg)
             except Exception as e:
                 log.error(f"DJ generation failed: {e}")
 
-        return self.mixer.make_segment(track.path, dj_clip_path, segment_name)
+        seg_path, dj_at = self.mixer.make_segment(track.path, dj_clip_path, segment_name)
+        return seg_path, dj_at, dj_text
 
     def _icecast_url(self) -> Optional[str]:
         ice = self.cfg.get("icecast", {})
@@ -580,8 +590,8 @@ class WKRTEngine:
         if self.next_track is None:
             return None
         idx = self.track_count
-        seg, _ = self._build_segment(self.current_track or self.next_track,
-                                      self.next_track, idx)
+        seg, _, _ = self._build_segment(self.current_track or self.next_track,
+                                         self.next_track, idx)
         return seg
 
     # ── Display helpers ──────────────────────────────────────────────────────
