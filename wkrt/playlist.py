@@ -31,6 +31,7 @@ class Track:
     title: str
     duration_seconds: float = 0.0
     album: str = ""
+    from_crate: bool = False  # True for freshly ingested tracks; cleared after first DJ announcement
 
     @property
     def display(self) -> str:
@@ -114,6 +115,10 @@ class PlaylistQueue:
     Generates tracks in year-weighted random order.
     Never plays the same track twice in a row.
     Avoids repeating a track until at least half the library has played.
+
+    Freshly ingested tracks sit in a priority crate and play before the
+    regular shuffle, with from_crate=True so the engine can trigger a
+    special DJ announcement.
     """
 
     def __init__(self, library: dict[int, list[Track]], year_weights: dict[str, float]):
@@ -122,6 +127,7 @@ class PlaylistQueue:
         self._recent: list[Path] = []
         self._history_limit = max(10, sum(len(v) for v in library.values()) // 4)
         self._queue: list[Track] = []
+        self._crate: list[Track] = []   # new arrivals — played before regular shuffle
         self._refill()
 
     def _weighted_years(self) -> list[int]:
@@ -157,7 +163,25 @@ class PlaylistQueue:
     def __iter__(self) -> Iterator[Track]:
         return self
 
+    def add_track(self, track: Track):
+        """Hot-add a track to the library and drop it into the crate."""
+        self.library.setdefault(track.year, []).append(track)
+        self._history_limit = max(10, self.library_size // 4)
+        self._crate.append(track)
+
+    @property
+    def crate_size(self) -> int:
+        return len(self._crate)
+
     def __next__(self) -> Track:
+        # Crate tracks play first (new arrivals get immediate airtime)
+        if self._crate:
+            track = self._crate.pop(0)
+            self._recent.append(track.path)
+            if len(self._recent) > self._history_limit:
+                self._recent.pop(0)
+            return track
+
         if not self._queue:
             self._refill()
 

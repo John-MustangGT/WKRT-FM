@@ -1,0 +1,12 @@
+[Unit]
+Description=WKRT music ingest — process new_music/ drops
+After=wkrt-fm.service
+
+[Service]
+Type=oneshot
+User=roxanne
+WorkingDirectory=/home/roxanne/wkrt
+EnvironmentFile=-/home/roxanne/wkrt/.env
+ExecStart=/usr/bin/python3 /home/roxanne/wkrt/wkrt_ingest.py
+StandardOutput=journal
+StandardError=journal

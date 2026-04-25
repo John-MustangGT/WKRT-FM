@@ -11,6 +11,7 @@ Routes:
   POST /api/queue/next         body: {"artist":…, "title":…, "year":…}  [auth required]
   GET  /api/listeners          → JSON list of Icecast clients  [auth required]
   POST /api/listeners/kick     body: {"id": "5"}  [auth required]
+  POST /api/library/ingest     body: {"paths": [...]}  [auth required]
 """
 import base64
 import json
@@ -127,6 +128,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._respond(200, "application/json", b'{"ok":true}')
             else:
                 self._respond(502, "text/plain", b"Icecast kick failed")
+
+        elif self.path == "/api/library/ingest":
+            if not self.engine:
+                return self._respond(503, "text/plain", b"Engine not available")
+            try:
+                paths = json.loads(body).get("paths", [])
+            except (ValueError, AttributeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need paths array")
+            added = self.engine.ingest_tracks(paths)
+            data = json.dumps({"ok": True, "ingested": len(added),
+                               "tracks": [t.display for t in added]}).encode()
+            self._respond(200, "application/json", data)
 
         else:
             self._respond(404, "text/plain", b"Not found")

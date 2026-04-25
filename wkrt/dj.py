@@ -25,6 +25,7 @@ class ClipType(Enum):
     STATION_ID = "station_id"
     TOP_OF_HOUR = "top_of_hour"
     CONNECT_ID = "connect_id"
+    NEW_ARRIVAL = "new_arrival"
 
 
 @dataclass
@@ -109,6 +110,18 @@ Rules:
 - Could tease that more rock is coming
 - Output ONLY the spoken text
 """,
+
+    ClipType.NEW_ARRIVAL: """
+Generate a DJ break announcing a fresh addition to the station's rotation (2-4 sentences).
+Just dropped into the crate: "{next_artist}" - "{next_title}" ({next_year})
+
+Rules:
+- Make it clear this track just landed — "just added to the crate", "fresh drop", "just dug this one out"
+- Sound genuinely excited, like you personally picked it
+- Tease something interesting about the song or artist if you know it
+- Do NOT say "stay tuned" or "don't go anywhere"
+- Output ONLY the spoken text
+""",
 }
 
 def _time_of_day(tz_name: str) -> str:
@@ -155,6 +168,8 @@ class DJEngine:
         if clip_type == ClipType.TRIVIA and not prev_track:
             clip_type = ClipType.STATION_ID
         if clip_type == ClipType.DEDICATION and not next_track:
+            clip_type = ClipType.STATION_ID
+        if clip_type == ClipType.NEW_ARRIVAL and not next_track:
             clip_type = ClipType.STATION_ID
 
         prompt = self._build_prompt(clip_type, prev_track, next_track, context)

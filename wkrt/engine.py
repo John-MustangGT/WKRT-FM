@@ -30,8 +30,8 @@ from rich.text import Text
 from .config import load, resolve_paths
 from .cache import StartupCache, TopOfHourScheduler
 from .hooks import HookServer
-from .playlist import scan_library, PlaylistQueue, Track
-from .dj import DJEngine
+from .playlist import scan_library, PlaylistQueue, Track, AUDIO_EXTENSIONS, _read_tags
+from .dj import DJEngine, ClipType
 from .tts import TTSEngine
 from .mixer import Mixer
 from .state import StationState
@@ -81,8 +81,9 @@ class WKRTEngine:
         self._dj_override: Optional[str] = None
         self._dj_override_lock = threading.Lock()
 
-        # Library and forced-next track (set by admin API)
+        # Library, queue ref (set in run()), and forced-next track (set by admin API)
         self._library: dict = {}
+        self._queue = None          # PlaylistQueue — set once run() builds it
         self._forced_next: Optional[Track] = None
         self._forced_next_lock = threading.Lock()
 
@@ -136,6 +137,7 @@ class WKRTEngine:
         self._library = library
         year_weights = self.cfg["playlist"].get("year_weights", {})
         queue = PlaylistQueue(library, year_weights)
+        self._queue = queue
         self.state.set_dj_names([d["name"] for d in self._dj_configs])
 
         console.print(
@@ -273,18 +275,23 @@ class WKRTEngine:
         from .cache import CacheState
         listeners_present = self.cache.state in (CacheState.WARM, CacheState.RUNNING)
 
-        insert_dj = (
-            self.dj_every > 0
-            and (self.track_count % self.dj_every == 0)
-            and listeners_present
+        # Crate tracks always get a DJ announcement regardless of the normal cadence
+        crate_incoming = bool(next_track and next_track.from_crate)
+        insert_dj = listeners_present and (
+            crate_incoming
+            or (self.dj_every > 0 and self.track_count % self.dj_every == 0)
         )
 
         if insert_dj:
             try:
                 active_engine = self._dj_engines[dj_cfg["name"]]
+                force_type = ClipType.NEW_ARRIVAL if crate_incoming else None
+                if crate_incoming:
+                    next_track.from_crate = False  # consumed — won't re-trigger on replay
                 script = active_engine.generate(
                     prev_track=track,
                     next_track=next_track,
+                    force_type=force_type,
                     context=self.context.get(),
                 )
                 self._print_dj(script.text, dj_cfg["name"])
@@ -429,6 +436,52 @@ class WKRTEngine:
                 if track.artist == artist and track.title == title and track.year == year:
                     return track
         return None
+
+    def ingest_tracks(self, paths: list) -> list[Track]:
+        """Hot-add audio files to the library and crate. Returns successfully added tracks."""
+        import re
+        added = []
+        for raw in paths:
+            path = Path(raw)
+            if not path.exists() or path.suffix.lower() not in AUDIO_EXTENSIONS:
+                log.warning(f"Ingest skip (not found or bad extension): {path}")
+                continue
+            artist, title, duration, album = _read_tags(path)
+            # Year: ID3 date tag → parent dir name → skip
+            year = None
+            try:
+                from mutagen import File as _MFile
+                audio = _MFile(path, easy=True)
+                if audio and audio.tags:
+                    for key in ("date", "year"):
+                        val = str((audio.tags.get(key) or [""])[0])
+                        m = re.search(r"(19|20)\d{2}", val)
+                        if m:
+                            year = int(m.group())
+                            break
+            except Exception:
+                pass
+            if not year:
+                m = re.fullmatch(r"(19|20)\d{2}", path.parent.name)
+                year = int(m.group()) if m else None
+            if not year:
+                log.warning(f"Ingest skip (no year): {path.name}")
+                continue
+            track = Track(
+                path=path, year=year, artist=artist, title=title,
+                duration_seconds=duration, album=album, from_crate=True,
+            )
+            if self._queue is not None:
+                self._queue.add_track(track)
+            else:
+                self._library.setdefault(year, []).append(track)
+            log.info(f"Ingested → {track.display}")
+            console.print(
+                f"[magenta]★ Crate:[/magenta] [white]{track.artist}[/white] — "
+                f"[yellow]{track.title}[/yellow] [dim]({track.year})[/dim]"
+            )
+            added.append(track)
+        return added
 
     def get_library_for_api(self) -> list:
         """Return library grouped by artist, sorted, suitable for JSON serialisation."""

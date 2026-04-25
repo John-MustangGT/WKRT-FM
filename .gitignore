@@ -11,5 +11,7 @@ logs/
 voices/*.onnx
 voices/*.onnx.json
 music/
+new_music/*
+!new_music/.gitkeep
 wkrt_library.json
 shopping_list.txt
