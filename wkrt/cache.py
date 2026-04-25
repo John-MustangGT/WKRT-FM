@@ -78,6 +78,7 @@ class StartupCache:
 
     def on_listener_connect(self):
         """Called when a listener connects (Icecast on-connect hook)."""
+        need_warmup = False
         with self._state_lock:
             self._listener_count += 1
             log.info(f"Listener connected (total: {self._listener_count})")
@@ -91,8 +92,11 @@ class StartupCache:
                 self.state = CacheState.RUNNING
                 log.info("Cache → RUNNING")
             elif self.state == CacheState.COLD:
-                # Late connect before warmup — start warming now
-                self.start_warmup()
+                need_warmup = True
+
+        # start_warmup() acquires _state_lock — must be called outside the lock
+        if need_warmup:
+            self.start_warmup()
 
     def on_listener_disconnect(self):
         """Called when a listener disconnects (Icecast on-disconnect hook)."""

@@ -190,11 +190,15 @@ class DJEngine:
         context: Optional[dict] = None,
     ) -> str:
         template = _PROMPTS[clip_type]
+        now = datetime.datetime.now(ZoneInfo(self.timezone))
+        hour_12 = now.hour % 12 or 12
+        ampm = "AM" if now.hour < 12 else "PM"
         kwargs = {
             "city": self.station.get("city", "Boston"),
             "call_sign": self.station.get("call_sign", "WKRT"),
             "frequency": self.station.get("frequency", "104.7"),
             "time_of_day": _time_of_day(self.timezone),
+            "hour": f"{hour_12} {ampm}",
         }
         if prev_track:
             kwargs.update({
