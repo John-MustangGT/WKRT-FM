@@ -91,7 +91,11 @@ class WKRTEngine:
 
         self._ffplay = shutil.which("ffplay")
         self._stop = threading.Event()
-        self._stream_proc: Optional[subprocess.Popen] = None
+
+        # One ffmpeg process per streaming target
+        self._targets: list[dict] = self._load_targets()
+        self._stream_procs: list[Optional[subprocess.Popen]] = [None] * len(self._targets)
+        self._reconnecting: set[int] = set()
 
         self._listener_count = 0
         self._connect_id_pending = threading.Event()
@@ -102,9 +106,10 @@ class WKRTEngine:
         # Top-of-hour scheduler
         self.toh = TopOfHourScheduler(self, None)  # cache set after init
 
-        # Startup cache + listener hooks
+        # Startup cache + listener hooks — hook_port lives on the primary (local) target
         self.cache = StartupCache(self)
-        hook_port = self.cfg.get("icecast", {}).get("hook_port", 8765)
+        primary_target = self._targets[0] if self._targets else {}
+        hook_port = primary_target.get("hook_port", 8765)
         self.hooks = HookServer(
             on_connect=self._on_listener_connect,
             on_disconnect=self._on_listener_disconnect,
@@ -141,28 +146,29 @@ class WKRTEngine:
         # Start context fetcher (weather + sports)
         self.context.start()
 
-        # Start web UI
+        # Start web UI — listener panel uses the first target with admin_password
         web_cfg = self.cfg.get("web", {})
         web_port = web_cfg.get("port", 8080)
-        ice = self.cfg.get("icecast", {})
-        self.state.stream_port = ice.get("port", 8000)
-        self.state.stream_mount = ice.get("mount", "/wkrt")
+        primary = self._targets[0] if self._targets else {}
+        self.state.stream_port = primary.get("port", 8000)
+        self.state.stream_mount = primary.get("mount", "/wkrt")
         self.state.stream_url = (
-            f"http://{ice.get('host', 'localhost')}:{self.state.stream_port}"
+            f"http://{primary.get('host', 'localhost')}:{self.state.stream_port}"
             f"{self.state.stream_mount}"
+        )
+        local_ice = next(
+            (t for t in self._targets if t.get("admin_password")), primary
         )
         web_admin_pw = web_cfg.get("admin_password", "")
         WebServer(
             self.state, engine=self, port=web_port,
             admin_password=web_admin_pw,
-            ice_cfg=self.cfg.get("icecast", {}),
+            ice_cfg=local_ice,
         ).start()
         console.print(f"[cyan]Web UI →[/cyan] http://0.0.0.0:{web_port}/")
 
-        # Start Icecast stream
-        self._stream_proc = self._start_icecast_stream()
-        if self._stream_proc:
-            console.print(f"[green]Streaming →[/green] {self.state.stream_url}")
+        # Start all Icecast streams
+        self._start_all_streams()
 
         # Poll Icecast stats to keep listener count accurate even without webhooks
         threading.Thread(
@@ -290,21 +296,28 @@ class WKRTEngine:
         seg_path, dj_at = self.mixer.make_segment(track.path, dj_clip_path, segment_name)
         return seg_path, dj_at, dj_text
 
-    def _icecast_url(self) -> Optional[str]:
+    # ── Multi-target streaming ────────────────────────────────────────────────
+
+    def _load_targets(self) -> list[dict]:
+        """Return list of Icecast target dicts from config.
+        Supports both [[icecast.targets]] (new) and flat [icecast] (legacy)."""
         ice = self.cfg.get("icecast", {})
-        if not ice:
-            return None
+        if "targets" in ice:
+            return list(ice["targets"])
+        if ice.get("host"):
+            return [ice]
+        return []
+
+    def _target_url(self, target: dict) -> str:
         return (
-            f"icecast://source:{ice.get('source_password', 'hackme')}"
-            f"@{ice.get('host', 'localhost')}:{ice.get('port', 8000)}"
-            f"{ice.get('mount', '/wkrt')}"
+            f"icecast://source:{target.get('source_password', 'hackme')}"
+            f"@{target.get('host', 'localhost')}:{target.get('port', 8000)}"
+            f"{target.get('mount', '/wkrt')}"
         )
 
-    def _start_icecast_stream(self) -> Optional[subprocess.Popen]:
-        """Start a persistent ffmpeg process piping MP3 data to Icecast."""
-        url = self._icecast_url()
-        if not url:
-            return None
+    def _start_stream(self, target: dict) -> Optional[subprocess.Popen]:
+        """Start one persistent ffmpeg process for the given target."""
+        url = self._target_url(target)
         station = self.cfg["station"]
         cmd = [
             "ffmpeg", "-loglevel", "warning",
@@ -322,27 +335,57 @@ class WKRTEngine:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            log.info(f"Icecast stream started → {url}")
+            log.info(f"Stream started → {target.get('name', url)}")
             return proc
         except Exception as e:
-            log.error(f"Failed to start Icecast stream: {e}")
+            log.error(f"Failed to start stream '{target.get('name')}': {e}")
             return None
 
-    def _ensure_stream(self) -> bool:
-        """Ensure Icecast stream is live, reconnecting with backoff if needed."""
-        if self._stream_proc and self._stream_proc.poll() is None:
-            return True
-        for attempt in range(12):  # retry up to ~2 minutes
+    def _start_all_streams(self):
+        for i, target in enumerate(self._targets):
+            proc = self._start_stream(target)
+            self._stream_procs[i] = proc
+            label = target.get("name", target.get("host", str(i)))
+            url = self._target_url(target).split("@", 1)[-1]  # strip credentials
+            if proc:
+                console.print(f"[green]Streaming →[/green] {label}  [dim]({url})[/dim]")
+            else:
+                console.print(f"[red]Stream failed →[/red] {label}")
+
+    def _ensure_all_streams(self) -> bool:
+        """Return True if at least one stream is live. Kick off background reconnects
+        for any dead targets (without blocking the main loop)."""
+        any_live = False
+        for i, proc in enumerate(self._stream_procs):
+            if proc and proc.poll() is None:
+                any_live = True
+            elif i not in self._reconnecting:
+                self._reconnecting.add(i)
+                threading.Thread(
+                    target=self._reconnect_worker,
+                    args=(i,),
+                    daemon=True,
+                    name=f"reconnect-{self._targets[i].get('name', i)}",
+                ).start()
+        return any_live
+
+    def _reconnect_worker(self, idx: int):
+        target = self._targets[idx]
+        name = target.get("name", target.get("host", str(idx)))
+        for attempt in range(12):
             if self._stop.is_set():
-                return False
+                break
             wait = min(60, 5 * (attempt + 1))
-            log.warning(f"Icecast stream down — reconnecting in {wait}s (attempt {attempt + 1})")
+            log.warning(f"Stream '{name}' down — reconnecting in {wait}s (attempt {attempt + 1})")
             time.sleep(wait)
-            self._stream_proc = self._start_icecast_stream()
-            if self._stream_proc and self._stream_proc.poll() is None:
-                return True
-        log.error("Could not reconnect to Icecast after retries")
-        return False
+            proc = self._start_stream(target)
+            if proc and proc.poll() is None:
+                self._stream_procs[idx] = proc
+                log.info(f"Stream '{name}' reconnected")
+                break
+        else:
+            log.error(f"Stream '{name}' could not reconnect after retries")
+        self._reconnecting.discard(idx)
 
     # ── DJ rotation ───────────────────────────────────────────────────────────
 
@@ -420,27 +463,28 @@ class WKRTEngine:
     # ── ICY metadata ──────────────────────────────────────────────────────────
 
     def _update_icy_metadata(self, title: str):
-        """Push a StreamTitle update to Icecast via the admin metadata API."""
-        ice = self.cfg.get("icecast", {})
-        if not ice:
-            return
-        host = ice.get("host", "localhost")
-        port = ice.get("port", 8000)
-        mount = ice.get("mount", "/wkrt")
-        password = ice.get("source_password", "hackme")
-        params = urlencode({"mount": mount, "mode": "updinfo", "song": title})
-        url = f"http://{host}:{port}/admin/metadata?{params}"
-        credentials = base64.b64encode(f"source:{password}".encode()).decode()
-        req = Request(url, headers={"Authorization": f"Basic {credentials}"})
-        try:
-            with urlopen(req, timeout=2):
-                pass
-            log.debug(f"ICY metadata → {title!r}")
-        except Exception as e:
-            log.debug(f"ICY metadata update failed: {e}")
+        """Push a StreamTitle update to all targets that have admin creds."""
+        for target in self._targets:
+            if not target.get("source_password"):
+                continue
+            host = target.get("host", "localhost")
+            port = target.get("port", 8000)
+            mount = target.get("mount", "/wkrt")
+            password = target["source_password"]
+            params = urlencode({"mount": mount, "mode": "updinfo", "song": title})
+            url = f"http://{host}:{port}/admin/metadata?{params}"
+            creds = base64.b64encode(f"source:{password}".encode()).decode()
+            req = Request(url, headers={"Authorization": f"Basic {creds}"})
+            try:
+                with urlopen(req, timeout=2):
+                    pass
+                log.debug(f"ICY metadata [{target.get('name', host)}] → {title!r}")
+            except Exception as e:
+                log.debug(f"ICY metadata [{target.get('name', host)}] failed: {e}")
 
     def _play(self, segment_path: Path, track: Track, dj_starts_at: Optional[float] = None):
-        """Feed segment to Icecast stream (or ffplay as fallback). Blocks until done."""
+        """Feed segment to all live Icecast streams (or ffplay as fallback).
+        Writes are concurrent so multiple targets don't multiply the wall-clock time."""
         self._print_now_playing(track)
         self.state.set_now_playing(track, self.next_track)
         self.state.set_cache_state(self.cache.state.name)
@@ -457,29 +501,46 @@ class WKRTEngine:
         else:
             dj_timer = None
 
-        # Icecast path: write segment into persistent ffmpeg pipe.
-        # The -re flag makes ffmpeg read at native rate, so stdin.write()
-        # blocks for approximately the segment duration — no separate sleep needed.
-        if self._icecast_url():
-            if not self._ensure_stream():
+        if self._targets:
+            if not self._ensure_all_streams():
                 if dj_timer:
                     dj_timer.cancel()
                 return
             try:
-                with open(segment_path, "rb") as f:
-                    self._stream_proc.stdin.write(f.read())
-                    self._stream_proc.stdin.flush()
-                return
-            except BrokenPipeError:
-                log.warning("Icecast pipe broke mid-segment — will reconnect next segment")
-                self._stream_proc = None
+                data = segment_path.read_bytes()
+            except OSError as e:
+                log.error(f"Could not read segment {segment_path.name}: {e}")
                 if dj_timer:
                     dj_timer.cancel()
+                return
+
+            # Write to every live target concurrently so wall-clock time == one segment
+            def _write(i: int, proc: subprocess.Popen):
+                try:
+                    proc.stdin.write(data)
+                    proc.stdin.flush()
+                except BrokenPipeError:
+                    name = self._targets[i].get("name", i)
+                    log.warning(f"Stream '{name}' pipe broke mid-segment")
+                    self._stream_procs[i] = None
+                except KeyboardInterrupt:
+                    self._stop.set()
+
+            writers = [
+                threading.Thread(target=_write, args=(i, proc), daemon=True)
+                for i, proc in enumerate(self._stream_procs)
+                if proc and proc.poll() is None
+            ]
+            for t in writers:
+                t.start()
+            try:
+                for t in writers:
+                    t.join()
             except KeyboardInterrupt:
                 self._stop.set()
                 if dj_timer:
                     dj_timer.cancel()
-                return
+            return
 
         # Fallback: local playback via ffplay
         if not self._ffplay:
@@ -512,24 +573,29 @@ class WKRTEngine:
         self.cache.on_listener_disconnect()
 
     def _poll_icecast_listeners(self) -> int:
-        """Fetch current listener count from Icecast public stats JSON endpoint."""
-        ice = self.cfg.get("icecast", {})
-        host = ice.get("host", "localhost")
-        port = ice.get("port", 8000)
-        mount = ice.get("mount", "/wkrt")
-        url = f"http://{host}:{port}/status-json.xsl"
-        try:
-            with urlopen(url, timeout=5) as resp:
-                data = json.loads(resp.read())
-            sources = data.get("icestats", {}).get("source", [])
-            if isinstance(sources, dict):
-                sources = [sources]
-            for source in sources:
-                if source.get("listenurl", "").endswith(mount):
-                    return int(source.get("listeners", 0))
-        except Exception as e:
-            log.debug(f"Icecast stats poll failed: {e}")
-        return self._listener_count  # keep last known on error
+        """Sum listener counts across local targets (those with hook_port)."""
+        total = 0
+        polled = False
+        for target in self._targets:
+            if not target.get("hook_port"):
+                continue  # skip external targets; we can't drive cache from them
+            host = target.get("host", "localhost")
+            port = target.get("port", 8000)
+            mount = target.get("mount", "/wkrt")
+            url = f"http://{host}:{port}/status-json.xsl"
+            try:
+                with urlopen(url, timeout=5) as resp:
+                    data = json.loads(resp.read())
+                sources = data.get("icestats", {}).get("source", [])
+                if isinstance(sources, dict):
+                    sources = [sources]
+                for source in sources:
+                    if source.get("listenurl", "").endswith(mount):
+                        total += int(source.get("listeners", 0))
+                        polled = True
+            except Exception as e:
+                log.debug(f"Icecast stats poll failed [{target.get('name', host)}]: {e}")
+        return total if polled else self._listener_count
 
     def _listener_poll_worker(self):
         """Background thread: reconciles listener count against Icecast stats every 15s."""
@@ -551,19 +617,26 @@ class WKRTEngine:
             self._stop.wait(15)
 
     def _play_clip(self, clip_path: Path):
-        """Write a standalone clip into the stream. Blocks for clip duration."""
+        """Write a standalone clip into all live streams. Blocks for clip duration."""
         dj_name = self.active_dj_cfg().get("name", "DJ")
         station = self.cfg.get("station", {})
         self._update_icy_metadata(
             f"{dj_name} — {station.get('call_sign', 'WKRT')}-FM {station.get('frequency', '104.7')}"
         )
-        if self._stream_proc and self._stream_proc.poll() is None:
-            try:
-                with open(clip_path, "rb") as f:
-                    self._stream_proc.stdin.write(f.read())
-                    self._stream_proc.stdin.flush()
-            except BrokenPipeError:
-                log.warning("Icecast stream broken during clip injection")
+        live = [(i, p) for i, p in enumerate(self._stream_procs) if p and p.poll() is None]
+        if live:
+            data = clip_path.read_bytes()
+            def _write(i, proc):
+                try:
+                    proc.stdin.write(data)
+                    proc.stdin.flush()
+                except BrokenPipeError:
+                    self._stream_procs[i] = None
+            threads = [threading.Thread(target=_write, args=(i, p), daemon=True) for i, p in live]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
         elif self._ffplay:
             subprocess.run(
                 [self._ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet",
@@ -573,12 +646,14 @@ class WKRTEngine:
 
     def stop(self):
         self._stop.set()
-        if self._stream_proc:
-            try:
-                self._stream_proc.stdin.close()
-                self._stream_proc.wait(timeout=5)
-            except Exception:
-                self._stream_proc.kill()
+        for i, proc in enumerate(self._stream_procs):
+            if proc:
+                try:
+                    proc.stdin.close()
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+                self._stream_procs[i] = None
 
     def pause(self):
         """Called by cache when cooling timeout reached — no listeners."""
