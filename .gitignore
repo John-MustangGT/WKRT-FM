@@ -17,3 +17,6 @@ wkrt_library.json
 shopping_list.txt
 config/favorites_*.json
 config/annotations/*
+config/dj_stats.json
+config/history/
+config/library_state.json
