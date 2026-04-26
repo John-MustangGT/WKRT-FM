@@ -113,14 +113,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(200, "application/json", json.dumps(favs).encode())
 
         elif self.path.startswith("/api/track"):
-            if not self._require_admin():
-                return
             qs = parse_qs(urlparse(self.path).query)
             artist = (qs.get("artist") or [""])[0]
             title  = (qs.get("title") or [""])[0]
             if not artist or not title:
                 return self._respond(400, "text/plain", b"Need artist and title params")
             data = self._track_detail(artist, title)
+            data.pop("file_path", None)   # never expose server path to clients
             self._respond(200, "application/json", json.dumps(data).encode())
 
         else:

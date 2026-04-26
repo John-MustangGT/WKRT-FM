@@ -205,6 +205,76 @@
   .tl-title  { color: var(--dim); }
   .tl-year   { color: var(--accent2); font-size: 0.72rem; flex-shrink: 0; }
 
+  /* ── Track detail panel ── */
+  .panel-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 199; display: none; cursor: pointer;
+  }
+  .panel-overlay.open { display: block; }
+  .track-panel {
+    position: fixed; top: 0; right: -500px;
+    width: 460px; max-width: 100vw; height: 100vh;
+    background: #141414; border-left: 1px solid var(--border);
+    z-index: 200; overflow-y: auto;
+    transition: right 0.25s ease;
+  }
+  .track-panel.open { right: 0; }
+  .panel-hdr {
+    position: sticky; top: 0; background: #141414;
+    border-bottom: 1px solid var(--border);
+    padding: 13px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-close {
+    background: none; border: none; color: var(--dim);
+    font-size: 1.1rem; cursor: pointer; padding: 4px 8px;
+  }
+  .panel-close:hover { color: var(--text); }
+  .panel-art { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+  .panel-art-ph {
+    width: 100%; height: 110px;
+    background: linear-gradient(135deg, #1a0900, #111);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.5rem; color: var(--border);
+  }
+  .panel-title-block { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .panel-track-name  { font-size: 1.05rem; font-weight: 700; margin-bottom: 3px; }
+  .panel-track-sub   { font-size: 0.82rem; color: var(--accent2); }
+  .panel-track-year  { font-size: 0.75rem; color: var(--dim); margin-top: 2px; }
+  .panel-sec { padding: 13px 16px; border-bottom: 1px solid var(--border); }
+  .panel-sec-label {
+    font-size: 0.6rem; font-weight: 700; letter-spacing: 2.5px;
+    color: var(--accent); text-transform: uppercase; margin-bottom: 9px;
+  }
+  .panel-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 0.81rem; margin-bottom: 5px;
+  }
+  .panel-row:last-child { margin-bottom: 0; }
+  .panel-row-k { color: var(--dim); flex-shrink: 0; margin-right: 12px; }
+  .panel-row-v { color: var(--text); text-align: right; word-break: break-word; }
+  .panel-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
+  .panel-tag {
+    font-size: 0.68rem; padding: 2px 8px; border-radius: 10px;
+    background: #1a0900; border: 1px solid #f48c0630; color: var(--accent2);
+  }
+  .hist-dj { margin-bottom: 12px; }
+  .hist-dj:last-child { margin-bottom: 0; }
+  .hist-dj-name {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 1px;
+    color: var(--accent2); text-transform: uppercase; margin-bottom: 5px;
+  }
+  .hist-slots { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
+  .hist-slot {
+    font-size: 0.68rem; padding: 2px 7px; border-radius: 4px;
+    background: #111; border: 1px solid var(--border); color: var(--dim);
+  }
+  .hist-slot strong { color: var(--text); }
+  .hist-play { font-size: 0.75rem; color: var(--dim); padding: 1px 0; }
+  .track-link { cursor: pointer; }
+  .track-link:hover { color: var(--accent2); }
+  .no-hist { color: var(--dim); font-style: italic; font-size: 0.82rem; }
+
   /* ── Footer status ── */
   .status-bar {
     display: flex;
@@ -289,6 +359,15 @@
 <!-- Hidden HTML5 audio element -->
 <audio id="audio" preload="none"></audio>
 
+<div class="panel-overlay" id="panel-overlay" onclick="closeTrackPanel()"></div>
+<div class="track-panel" id="track-panel">
+  <div class="panel-hdr">
+    <span style="font-size:.6rem;font-weight:700;letter-spacing:2.5px;color:var(--accent)">TRACK DETAIL</span>
+    <button class="panel-close" onclick="closeTrackPanel()">✕</button>
+  </div>
+  <div id="track-panel-body"></div>
+</div>
+
 <script>
   const audio = document.getElementById('audio');
   const playBtn = document.getElementById('play-btn');
@@ -357,11 +436,14 @@
       const t = d.current_track;
       const album = t.album ? `<div class="np-album">${esc(t.album)}</div>` : '';
       const next = d.next_track
-        ? `<div class="np-next">Up next: <span>${esc(d.next_track.artist)} — ${esc(d.next_track.title)}</span></div>`
+        ? `<div class="np-next">Up next:
+            <span class="track-link" data-artist="${esc(d.next_track.artist)}" data-title="${esc(d.next_track.title)}" data-year="${d.next_track.year}">
+              ${esc(d.next_track.artist)} — ${esc(d.next_track.title)}
+            </span></div>`
         : '';
       npEl.innerHTML =
-        `<div class="np-artist">${esc(t.artist)}</div>
-         <div class="np-title">${esc(t.title)}</div>
+        `<div class="np-artist track-link" data-artist="${esc(t.artist)}" data-title="${esc(t.title)}" data-year="${t.year}">${esc(t.artist)}</div>
+         <div class="np-title track-link"  data-artist="${esc(t.artist)}" data-title="${esc(t.title)}" data-year="${t.year}">${esc(t.title)}</div>
          ${album}
          <span class="np-year">${t.year}</span>
          ${next}`;
@@ -386,7 +468,7 @@
     if (d.recent_tracks && d.recent_tracks.length) {
       document.getElementById('recent-tracks').innerHTML =
         d.recent_tracks.map(t =>
-          `<li>
+          `<li class="track-link" data-artist="${esc(t.artist)}" data-title="${esc(t.title)}" data-year="${t.year}">
             <span class="tl-left">
               <span class="tl-artist">${esc(t.artist)}</span>
               <span class="tl-title"> — ${esc(t.title)}</span>
@@ -403,6 +485,135 @@
 
   refresh();
   setInterval(refresh, 4000);
+
+  // ── Track detail panel ────────────────────────────────────────────────────
+  document.addEventListener('click', e => {
+    const el = e.target.closest('.track-link[data-artist]');
+    if (el) openTrackPanel(el.dataset.artist, el.dataset.title, parseInt(el.dataset.year, 10));
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTrackPanel(); });
+
+  function openTrackPanel(artist, title, year) {
+    document.getElementById('panel-overlay').classList.add('open');
+    document.getElementById('track-panel').classList.add('open');
+    document.getElementById('track-panel-body').innerHTML =
+      '<div style="padding:40px 16px;text-align:center;color:var(--dim)">Loading…</div>';
+    loadTrackDetail(artist, title, year);
+  }
+
+  function closeTrackPanel() {
+    document.getElementById('panel-overlay').classList.remove('open');
+    document.getElementById('track-panel').classList.remove('open');
+  }
+
+  async function loadTrackDetail(artist, title, year) {
+    try {
+      const params = new URLSearchParams({ artist, title });
+      const d = await fetch(`/api/track?${params}`).then(r => r.json());
+      renderTrackDetail(d);
+    } catch(e) {
+      document.getElementById('track-panel-body').innerHTML =
+        '<div style="padding:20px;color:#ff4444">Failed to load track data.</div>';
+    }
+  }
+
+  function _timeAgo(isoStr) {
+    if (!isoStr) return '—';
+    const secs = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+    if (secs < 60)    return 'just now';
+    if (secs < 3600)  return Math.floor(secs / 60) + 'm ago';
+    if (secs < 86400) {
+      const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
+      return m ? `${h}h ${m}m ago` : `${h}h ago`;
+    }
+    return Math.floor(secs / 86400) + 'd ago';
+  }
+
+  function fmtDuration(s) {
+    s = Math.round(s);
+    const m = Math.floor(s / 60), sec = s % 60;
+    return `${m}:${String(sec).padStart(2,'0')}`;
+  }
+
+  function renderTrackDetail(d) {
+    const ann  = d.annotation || {};
+    const id3  = d.id3        || {};
+    const hist = d.history    || { total_plays: 0, djs: {} };
+
+    let artHtml = '<div class="panel-art-ph">♪</div>';
+    if (d.album_art && d.album_art.source === 'id3') {
+      artHtml = `<img class="panel-art" src="data:${d.album_art.mime};base64,${d.album_art.data}" alt="">`;
+    } else if (d.album_art && d.album_art.url) {
+      artHtml = `<img class="panel-art" src="${esc(d.album_art.url)}" alt=""
+        onerror="this.parentNode.innerHTML='<div class=panel-art-ph>♪</div>'">`;
+    }
+
+    const infoRows = [
+      ['Album',    id3.album      || ann.album || ''],
+      ['Genre',    id3.genre      || ''],
+      ['Duration', id3.duration_seconds ? fmtDuration(id3.duration_seconds) : ''],
+    ].filter(([,v]) => v);
+
+    const mbRows = [
+      ['Label',    esc(ann.label        || '')],
+      ['Released', esc(ann.release_year || '')],
+    ].filter(([,v]) => v);
+    const mbidHtml = ann.mbid
+      ? `<div class="panel-row"><span class="panel-row-k">MBID</span>
+           <span class="panel-row-v"><a href="https://musicbrainz.org/recording/${ann.mbid}"
+             target="_blank" style="color:#4a9eff;font-size:.72rem">${ann.mbid.slice(0,8)}…</a></span></div>`
+      : '';
+    const tagsHtml = (ann.tags||[]).length
+      ? `<div class="panel-tags">${ann.tags.map(t=>`<span class="panel-tag">${esc(t)}</span>`).join('')}</div>`
+      : '';
+
+    const SLOTS = ['morning','midday','afternoon','evening','night'];
+    const djNames = Object.keys(hist.djs || {});
+    let histInner = '';
+    if (!hist.total_plays) {
+      histInner = '<div class="no-hist">No plays recorded yet</div>';
+    } else {
+      histInner = `<div style="font-size:.82rem;margin-bottom:10px">Total plays: <strong>${hist.total_plays}</strong></div>`;
+      for (const name of djNames) {
+        const dj = hist.djs[name];
+        const slotBits = SLOTS.filter(s=>dj.by_slot[s])
+          .map(s=>`<span class="hist-slot"><strong>${dj.by_slot[s]}</strong> ${s}</span>`).join('');
+        const playBits = (dj.last_played||[])
+          .map(p=>`<div class="hist-play">${_timeAgo(p.at)} · ${p.slot}</div>`).join('');
+        histInner += `<div class="hist-dj">
+          <div class="hist-dj-name">${esc(name)} — ${dj.total} play${dj.total!==1?'s':''}</div>
+          ${slotBits?`<div class="hist-slots">${slotBits}</div>`:''}
+          <div>${playBits}</div>
+        </div>`;
+      }
+    }
+
+    document.getElementById('track-panel-body').innerHTML = `
+      ${artHtml}
+      <div class="panel-title-block">
+        <div class="panel-track-name">${esc(d.title)}</div>
+        <div class="panel-track-sub">${esc(d.artist)}</div>
+        ${d.year ? `<div class="panel-track-year">${d.year}</div>` : ''}
+      </div>
+      ${infoRows.length ? `<div class="panel-sec">
+        <div class="panel-sec-label">File Info</div>
+        ${infoRows.map(([k,v])=>`<div class="panel-row">
+          <span class="panel-row-k">${k}</span>
+          <span class="panel-row-v">${esc(String(v))}</span>
+        </div>`).join('')}
+      </div>` : ''}
+      ${(mbRows.length||mbidHtml||tagsHtml) ? `<div class="panel-sec">
+        <div class="panel-sec-label">MusicBrainz</div>
+        ${mbRows.map(([k,v])=>`<div class="panel-row">
+          <span class="panel-row-k">${k}</span><span class="panel-row-v">${v}</span>
+        </div>`).join('')}
+        ${mbidHtml}${tagsHtml}
+      </div>` : ''}
+      <div class="panel-sec">
+        <div class="panel-sec-label">Play History</div>
+        ${histInner}
+      </div>`;
+  }
 </script>
 </body>
 </html>
