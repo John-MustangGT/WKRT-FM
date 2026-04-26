@@ -1,5 +1,114 @@
 # WKRT-FM TODO
 
+---
+
+## GPT-4o "Themed Hour" DJ
+
+A third DJ personality powered by OpenAI instead of Claude — does curated
+one-hour themed shows rather than the rolling block format.
+
+### Concept
+
+At the top of its shift the DJ picks a theme it can actually execute against
+the real library, then owns that hour end-to-end with themed banter throughout.
+
+Example themes (generated, not hardcoded):
+- "Summer of '83 — big hair, bigger riffs"
+- "FM Gold: the songs that owned the late-night drive"
+- "Hair Metal Happy Hour"
+- "One-Hit Wonders of the 80s"
+- "The Miami Vice Soundtrack (without actually being Miami Vice)"
+
+### API — near-identical to Anthropic
+
+```python
+# pip install openai
+from openai import OpenAI
+client = OpenAI(api_key=...)
+resp = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[
+        {"role": "system",  "content": persona},
+        {"role": "user",    "content": prompt},
+    ]
+)
+text = resp.choices[0].message.content
+```
+
+Add `api_backend = "openai"` and `openai_api_key = ""` to `[[djs]]` config.
+Default backend stays `"anthropic"` for Roxanne and Neon — no existing behavior
+changes.
+
+### Different programming model: theme-first, not block-first
+
+Current DJs: pick 6 tracks → break → 6 tracks → break → repeat.
+
+GPT DJ: at top of hour —
+1. Send full library summary to GPT-4o
+2. Ask it to propose a theme it can execute with the available tracks
+3. Ask it to select 12-15 tracks for the full hour, in order, with an energy arc
+4. Store theme + tracklist as `_themed_hour` state on the engine
+5. Each DJ break references the theme ("that was track 4 of our journey through…")
+6. Final break: themed outro before handing off to next DJ
+
+One API call to plan the hour, then normal per-break calls for banter.
+
+### Key constraint: library-aware theme selection
+
+GPT must see the library BEFORE picking a theme, not after. Prompt structure:
+
+```
+Here is what's actually in the crate: {library_summary}
+
+Pick a theme for a one-hour show that you can execute with at least
+10 of these tracks. Return JSON:
+{"theme": "...", "tagline": "...", "tracks": [{artist, title, year}, ...]}
+```
+
+Fuzzy-match the returned tracks back to real files (same `fuzzy_match()`
+already in `programmer.py`).
+
+### New engine fields needed
+
+```python
+self._themed_hour: Optional[dict] = None   # {theme, tagline, tracks: [Track]}
+self._themed_hour_index: int = 0           # which track we're on
+self._themed_hour_expiry: float = 0        # epoch seconds, reset each hour
+```
+
+`_get_next_track()` checks `_themed_hour` first when GPT DJ is active.
+
+### `settings.toml` additions
+
+```toml
+[[djs]]
+name        = "Chase"          # or whatever name fits
+shift_hours = 1                # one-hour block, rotates in with Roxanne/Neon
+tts_backend = "google"
+api_backend = "openai"
+openai_api_key = ""            # or pull from env OPENAI_API_KEY
+persona     = """
+You are Chase, afternoon drive DJ on WKRT 104.7. You do themed hours —
+each show has a concept that connects the music. You're the curator,
+not just the jock. Warm, smart, a little cinematic.
+"""
+
+[djs.clip_types]
+between_tracks = 50
+station_id     = 20
+top_of_hour    = 20
+trivia         = 10
+```
+
+### What GPT-4o brings that's genuinely different
+
+Strong pop-culture pattern matching baked into training — ask for "Miami Vice
+influence" and it knows Jan Hammer, Phil Collins, Glenn Frey without being told.
+Claude would too, but different training data = different flavor = more variety
+across the three DJs.
+
+---
+
 ## Discord Request/Dedication Bot
 
 Listeners post to a Discord channel; the bot wires their requests into the
