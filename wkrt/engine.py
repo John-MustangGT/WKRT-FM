@@ -40,6 +40,7 @@ from .web import WebServer
 from .context import StationContext
 from .programmer import DJProgrammer, current_time_slot
 from .annotator import Annotator
+from .history import PlayHistory
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -108,6 +109,7 @@ class WKRTEngine:
         base = Path(__file__).parent.parent
         self._programmer = DJProgrammer(self.cfg, base / "config")
         self._annotator  = Annotator(base / "config")
+        self._history    = PlayHistory(base / "config")
         self._programmed_block: list[Track] = []
         self._block_lock = threading.Lock()
         self._refilling  = threading.Event()
@@ -782,6 +784,12 @@ class WKRTEngine:
         self.state.set_now_playing(track, self.next_track)
         self.state.set_cache_state(self.cache.state.name)
         self._update_icy_metadata(f"{track.artist} - {track.title}")
+        tz = self.cfg["station"].get("timezone", "UTC")
+        self._history.record_play(
+            track.artist, track.title,
+            self.active_dj_cfg()["name"],
+            current_time_slot(tz),
+        )
 
         # Schedule a metadata flip to the active DJ when the talkover begins
         if dj_starts_at is not None and dj_starts_at > 0:

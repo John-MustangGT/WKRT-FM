@@ -24,6 +24,7 @@ Routes:
   POST /api/favorites/user/remove   body: {artist, title}  [auth required]
   GET  /api/favorites/dj/{name}     → DJ favorites by slot  [auth required]
   POST /api/favorites/dj/{name}/regenerate  [auth required]
+  GET  /api/track              → full track detail (id3, annotation, history, art)  [auth required]
 """
 import base64
 import json
@@ -33,6 +34,7 @@ import threading
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
 log = logging.getLogger(__name__)
@@ -109,6 +111,17 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             favs = self.engine._programmer.load_user_favorites() if self.engine else []
             self._respond(200, "application/json", json.dumps(favs).encode())
+
+        elif self.path.startswith("/api/track"):
+            if not self._require_admin():
+                return
+            qs = parse_qs(urlparse(self.path).query)
+            artist = (qs.get("artist") or [""])[0]
+            title  = (qs.get("title") or [""])[0]
+            if not artist or not title:
+                return self._respond(400, "text/plain", b"Need artist and title params")
+            data = self._track_detail(artist, title)
+            self._respond(200, "application/json", json.dumps(data).encode())
 
         else:
             m = re.match(r'^/api/favorites/dj/([^/]+)$', self.path)
@@ -326,6 +339,102 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as e:
             log.debug(f"Icecast killclient failed: {e}")
             return False
+
+    # ── Track detail ──────────────────────────────────────────────────────────
+
+    def _track_detail(self, artist: str, title: str) -> dict:
+        engine = self.__class__.engine
+        result: dict = {"artist": artist, "title": title}
+
+        # Find track in library for path + year
+        track = None
+        for tracks in (engine._library if engine else {}).values():
+            for t in tracks:
+                if t.artist == artist and t.title == title:
+                    track = t
+                    break
+            if track:
+                break
+
+        if track:
+            result["year"] = track.year
+            result["file_path"] = str(track.path)
+            result["id3"]      = self._read_id3(track.path)
+            result["album_art"] = self._extract_art(track.path)
+
+        # MusicBrainz annotation
+        ann = engine._annotator.load(artist, title) if engine else None
+        result["annotation"] = ann or {}
+
+        # Cover Art Archive fallback if no embedded art
+        if not result.get("album_art") and ann and ann.get("release_mbid"):
+            result["album_art"] = {
+                "source": "coverartarchive",
+                "url": f"https://coverartarchive.org/release/{ann['release_mbid']}/front",
+            }
+
+        # Play history
+        result["history"] = engine._history.load(artist, title) if engine else {}
+
+        return result
+
+    def _read_id3(self, path) -> dict:
+        try:
+            from mutagen import File as MFile
+            audio = MFile(path, easy=True)
+            if not audio:
+                return {}
+            tags: dict = {}
+            for key in ("title", "artist", "album", "date", "genre", "tracknumber"):
+                val = (audio.tags or {}).get(key)
+                if val:
+                    tags[key] = str(val[0])
+            if hasattr(audio, "info") and hasattr(audio.info, "length"):
+                tags["duration_seconds"] = round(audio.info.length, 1)
+            return tags
+        except Exception as e:
+            log.debug(f"ID3 read failed for {path}: {e}")
+            return {}
+
+    def _extract_art(self, path) -> dict:
+        try:
+            from mutagen import File as MFile
+            audio = MFile(path)
+            if not audio or not audio.tags:
+                return {}
+            tags = audio.tags
+            # MP3 — APIC frame
+            for key in list(tags.keys()):
+                if str(key).startswith("APIC"):
+                    apic = tags[key]
+                    if len(apic.data) <= 300_000:
+                        return {
+                            "source": "id3",
+                            "mime": apic.mime,
+                            "data": base64.b64encode(apic.data).decode(),
+                        }
+                    break
+            # M4A — covr atom
+            if "covr" in tags:
+                data = bytes(tags["covr"][0])
+                if len(data) <= 300_000:
+                    return {
+                        "source": "id3",
+                        "mime": "image/jpeg",
+                        "data": base64.b64encode(data).decode(),
+                    }
+            # FLAC — picture block
+            if hasattr(audio, "pictures") and audio.pictures:
+                pic = audio.pictures[0]
+                if len(pic.data) <= 300_000:
+                    return {
+                        "source": "id3",
+                        "mime": pic.mime,
+                        "data": base64.b64encode(pic.data).decode(),
+                    }
+        except Exception as e:
+            log.debug(f"Album art extraction failed for {path}: {e}")
+        return {}
 
     def log_message(self, fmt, *args):
         pass  # suppress per-request logging

@@ -118,6 +118,7 @@ class Annotator:
                 "release_year": release_year,
                 "tags":         tags,
                 "mbid":         rec.get("id"),
+                "release_mbid": releases[0].get("id") if releases else None,
                 "fetched_at":   now,
             }
             self._save(artist, title, annotation)
