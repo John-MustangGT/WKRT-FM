@@ -37,6 +37,7 @@ from .mixer import Mixer
 from .state import StationState
 from .web import WebServer
 from .context import StationContext
+from .programmer import DJProgrammer, current_time_slot
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -101,6 +102,13 @@ class WKRTEngine:
 
         self._force_dj = threading.Event()
 
+        # DJ block programmer
+        base = Path(__file__).parent.parent
+        self._programmer = DJProgrammer(self.cfg, base / "config")
+        self._programmed_block: list[Track] = []
+        self._block_lock = threading.Lock()
+        self._refilling  = threading.Event()
+
         self._listener_count = 0
         self._connect_id_pending = threading.Event()
 
@@ -151,6 +159,11 @@ class WKRTEngine:
         # Start context fetcher (weather + sports)
         self.context.start()
 
+        # Generate DJ favorites + first programmed block in background
+        threading.Thread(
+            target=self._initial_block_worker, daemon=True, name="initial-block"
+        ).start()
+
         # Start web UI — listener panel uses the first target with admin_password
         web_cfg = self.cfg.get("web", {})
         web_port = web_cfg.get("port", 8080)
@@ -191,8 +204,8 @@ class WKRTEngine:
         console.print("[cyan]Top-of-hour scheduler started[/cyan]")
 
         # Prime the first two tracks
-        self.current_track = next(queue)
-        self.next_track = next(queue)
+        self.current_track = self._get_next_track()
+        self.next_track    = self._get_next_track()
         seg_index = 0
 
         # Pre-generate first segment synchronously so we start immediately
@@ -209,7 +222,7 @@ class WKRTEngine:
                     future_track = self._forced_next
                     self._forced_next = None
                 else:
-                    future_track = next(queue)
+                    future_track = self._get_next_track()
             pre_thread = threading.Thread(
                 target=self._pregenerate,
                 args=(self.next_track, future_track, seg_index),
@@ -476,6 +489,88 @@ class WKRTEngine:
             self._stream_procs[idx] = proc
             log.info(f"Target {idx} restarted")
 
+    # ── DJ block programming ──────────────────────────────────────────────────
+
+    def _get_next_track(self) -> Track:
+        """Next track: crate priority → programmed block → shuffle fallback."""
+        if self._queue and self._queue.crate_size > 0:
+            return next(self._queue)
+
+        track = None
+        remaining = 0
+        with self._block_lock:
+            if self._programmed_block:
+                track     = self._programmed_block.pop(0)
+                remaining = len(self._programmed_block)
+
+        if track is not None:
+            if remaining <= 2 and not self._refilling.is_set():
+                self._refilling.set()
+                threading.Thread(
+                    target=self._refill_block_worker, daemon=True, name="block-refill"
+                ).start()
+            return track
+
+        return next(self._queue)
+
+    def _refill_block_worker(self):
+        try:
+            dj_cfg  = self.active_dj_cfg()
+            tz      = self.cfg["station"].get("timezone", "UTC")
+            slot    = current_time_slot(tz)
+            ctx     = dict(self.context.get() or {})
+            live    = self.state.live_context
+            if live:
+                ctx["live_context"] = live
+            recent  = list(self.state.recent_tracks[:8])
+            user_favs = self._programmer.load_user_favorites()
+            block   = self._programmer.program_block(
+                dj_cfg, self._library, slot, ctx, recent, user_favs
+            )
+            if block:
+                with self._block_lock:
+                    self._programmed_block.extend(block)
+        except Exception as e:
+            log.error(f"Block refill failed: {e}")
+        finally:
+            self._refilling.clear()
+
+    def _initial_block_worker(self):
+        """Generate favorites (if absent) then prime the first block. Runs at startup."""
+        try:
+            for dj_cfg in self._dj_configs:
+                if not self._programmer.load_dj_favorites(dj_cfg["name"]):
+                    log.info(f"No favorites for {dj_cfg['name']} — generating now (first run)…")
+                    data = self._programmer.generate_all_slots(dj_cfg, self._library)
+                    self._programmer.save_dj_favorites(dj_cfg["name"], data)
+
+            # Prime block for the active DJ
+            dj_cfg    = self.active_dj_cfg()
+            tz        = self.cfg["station"].get("timezone", "UTC")
+            slot      = current_time_slot(tz)
+            user_favs = self._programmer.load_user_favorites()
+            block     = self._programmer.program_block(
+                dj_cfg, self._library, slot, self.context.get() or {}, [], user_favs
+            )
+            if block:
+                with self._block_lock:
+                    self._programmed_block = block + self._programmed_block
+                log.info(f"Initial block ready ({dj_cfg['name']}, {slot})")
+        except Exception as e:
+            log.error(f"Initial block worker failed: {e}")
+
+    def regenerate_dj_favorites(self, dj_name: str):
+        """Trigger a background re-generation of all slots for one DJ."""
+        dj_cfg = next((d for d in self._dj_configs if d["name"] == dj_name), None)
+        if not dj_cfg:
+            return
+        def _worker():
+            log.info(f"Regenerating favorites for {dj_name}…")
+            data = self._programmer.generate_all_slots(dj_cfg, self._library)
+            self._programmer.save_dj_favorites(dj_name, data)
+            log.info(f"Favorites regenerated for {dj_name}")
+        threading.Thread(target=_worker, daemon=True, name=f"regen-{dj_name}").start()
+
     # ── DJ rotation ───────────────────────────────────────────────────────────
 
     def active_dj_cfg(self) -> dict:
@@ -568,6 +663,11 @@ class WKRTEngine:
                 f"[yellow]{track.title}[/yellow] [dim]({track.year})[/dim]"
             )
             added.append(track)
+
+        if added:
+            for dj_cfg in self._dj_configs:
+                self.regenerate_dj_favorites(dj_cfg["name"])
+
         return added
 
     def get_library_for_api(self) -> list:

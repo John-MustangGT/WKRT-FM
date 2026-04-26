@@ -18,6 +18,11 @@ Routes:
   POST /api/targets/{idx}/enable    [auth required]
   POST /api/targets/{idx}/disable   [auth required]
   POST /api/targets/{idx}/restart   [auth required]
+  GET  /api/favorites/user          → user favorites list  [auth required]
+  POST /api/favorites/user/add      body: {artist, title, year}  [auth required]
+  POST /api/favorites/user/remove   body: {artist, title}  [auth required]
+  GET  /api/favorites/dj/{name}     → DJ favorites by slot  [auth required]
+  POST /api/favorites/dj/{name}/regenerate  [auth required]
 """
 import base64
 import json
@@ -92,8 +97,23 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             statuses = self.engine.target_statuses() if self.engine else []
             self._respond(200, "application/json", json.dumps(statuses).encode())
+
+        elif self.path == "/api/favorites/user":
+            if not self._require_admin():
+                return
+            favs = self.engine._programmer.load_user_favorites() if self.engine else []
+            self._respond(200, "application/json", json.dumps(favs).encode())
+
         else:
-            self._respond(404, "text/plain", b"Not found")
+            m = re.match(r'^/api/favorites/dj/([^/]+)$', self.path)
+            if m and self.engine:
+                if not self._require_admin():
+                    return
+                name = m.group(1)
+                data = self.engine._programmer.load_dj_favorites(name)
+                self._respond(200, "application/json", json.dumps(data).encode())
+            else:
+                self._respond(404, "text/plain", b"Not found")
 
     # ── POST ─────────────────────────────────────────────────────────────────
 
@@ -169,7 +189,40 @@ class _Handler(BaseHTTPRequestHandler):
             self.state.set_live_context(text, one_shot)
             self._respond(200, "application/json", b'{"ok":true}')
 
+        elif self.path == "/api/favorites/user/add":
+            if not self.engine:
+                return self._respond(503, "text/plain", b"Engine not available")
+            try:
+                req    = json.loads(body)
+                artist = str(req["artist"])
+                title  = str(req["title"])
+                year   = int(req["year"])
+            except (ValueError, KeyError, TypeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need artist, title, year")
+            self.engine._programmer.add_user_favorite(artist, title, year)
+            self._respond(200, "application/json", b'{"ok":true}')
+
+        elif self.path == "/api/favorites/user/remove":
+            if not self.engine:
+                return self._respond(503, "text/plain", b"Engine not available")
+            try:
+                req    = json.loads(body)
+                artist = str(req["artist"])
+                title  = str(req["title"])
+            except (ValueError, KeyError, TypeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need artist, title")
+            self.engine._programmer.remove_user_favorite(artist, title)
+            self._respond(200, "application/json", b'{"ok":true}')
+
         else:
+            m = re.match(r'^/api/favorites/dj/([^/]+)/regenerate$', self.path)
+            if m and self.engine:
+                if not self._require_admin():
+                    return
+                self.engine.regenerate_dj_favorites(m.group(1))
+                self._respond(200, "application/json", b'{"ok":true}')
+                return
+
             m = re.match(r'^/api/targets/(\d+)/(enable|disable|restart)$', self.path)
             if m and self.engine:
                 idx = int(m.group(1))

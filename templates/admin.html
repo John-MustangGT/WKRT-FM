@@ -190,6 +190,67 @@
   .kick-btn:hover { background: var(--red); color: #fff; }
   .no-listeners { color: var(--dim); font-style: italic; font-size: 0.84rem; padding: 12px 2px; }
 
+  /* ── Favorites ── */
+  .fav-btn {
+    width: 26px; height: 26px; border-radius: 4px; border: 1px solid var(--border);
+    background: transparent; color: var(--dim); font-size: 0.9rem; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: color .15s, border-color .15s;
+    flex-shrink: 0;
+  }
+  .fav-btn:hover { color: var(--accent2); border-color: var(--accent2); }
+  .fav-btn.active { color: #f5a623; border-color: #f5a623; }
+
+  .fav-list { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .fav-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px; background: #111; border-radius: 5px;
+    font-size: 0.82rem;
+  }
+  .fav-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .fav-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fav-artist { font-size: 0.72rem; color: var(--dim); }
+  .fav-remove {
+    padding: 3px 8px; border-radius: 4px; border: 1px solid #333;
+    background: transparent; color: var(--dim); font-size: 0.7rem; cursor: pointer;
+    flex-shrink: 0; margin-left: 8px;
+    transition: border-color .15s, color .15s;
+  }
+  .fav-remove:hover { border-color: var(--red); color: var(--red); }
+  .no-favs { color: var(--dim); font-style: italic; font-size: 0.82rem; padding: 8px 2px; }
+
+  .dj-fav-section { margin-top: 16px; }
+  .dj-fav-section:first-child { margin-top: 0; }
+  .dj-fav-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .dj-fav-name { font-size: 0.75rem; font-weight: 700; letter-spacing: 1.5px;
+                 color: var(--accent2); text-transform: uppercase; }
+  .slot-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+  .slot-tab {
+    padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border);
+    background: #111; color: var(--dim); font-size: 0.7rem; cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .slot-tab:hover { background: #1e1e1e; color: var(--text); }
+  .slot-tab.active { background: #1a0900; border-color: var(--accent); color: var(--accent2); }
+  .slot-tracks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .slot-track {
+    font-size: 0.75rem; padding: 3px 8px; border-radius: 4px;
+    background: #141414; border: 1px solid var(--border); color: var(--dim);
+    white-space: nowrap;
+  }
+  .slot-track strong { color: var(--text); }
+  .regen-btn {
+    padding: 4px 12px; border-radius: 4px; border: 1px solid var(--blue);
+    background: transparent; color: var(--blue); font-size: 0.72rem;
+    font-weight: 700; cursor: pointer; letter-spacing: 0.5px;
+    transition: background .15s, color .15s;
+  }
+  .regen-btn:hover { background: var(--blue); color: #fff; }
+  .regen-btn:disabled { opacity: .4; cursor: default; }
+
   /* ── Live context ── */
   .context-textarea {
     width: 100%; background: #111; border: 1px solid var(--border);
@@ -312,6 +373,24 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- User Favorites -->
+    <div class="card">
+      <div class="card-label">Your Favorites</div>
+      <p style="font-size:.8rem;color:var(--dim);margin-bottom:10px;line-height:1.5">
+        Up to 20 tracks always included in the DJ's programming pool. Star a song in the queue browser to add it.
+      </p>
+      <div id="user-fav-panel"><div class="no-favs">Loading…</div></div>
+    </div>
+
+    <!-- DJ Favorites -->
+    <div class="card">
+      <div class="card-label">DJ Favorites</div>
+      <p style="font-size:.8rem;color:var(--dim);margin-bottom:10px;line-height:1.5">
+        Each DJ's curated picks by slot. Regenerate after adding new music.
+      </p>
+      <div id="dj-fav-panel"><div class="no-favs">Loading…</div></div>
     </div>
 
     <!-- Live Context Injection -->
@@ -492,20 +571,29 @@
         <div class="song-title">${esc(t.title)}</div>
         <div class="song-row2">
           <span class="song-year">${t.year}</span>
-          <button class="queue-btn"
-            data-artist="${esc(t.artist)}"
-            data-title="${esc(t.title)}"
-            data-year="${t.year}">
-            Queue&nbsp;Next
-          </button>
+          <div style="display:flex;gap:5px;align-items:center">
+            <button class="fav-btn${isFav(t.artist,t.title)?' active':''}"
+              data-artist="${esc(t.artist)}"
+              data-title="${esc(t.title)}"
+              data-year="${t.year}"
+              title="${isFav(t.artist,t.title)?'Remove from favorites':'Add to favorites'}">★</button>
+            <button class="queue-btn"
+              data-artist="${esc(t.artist)}"
+              data-title="${esc(t.title)}"
+              data-year="${t.year}">
+              Queue&nbsp;Next
+            </button>
+          </div>
         </div>
       </div>`
     ).join('');
   }
 
   document.getElementById('song-list').addEventListener('click', e => {
-    const btn = e.target.closest('.queue-btn');
-    if (btn) queueTrack(btn.dataset.artist, btn.dataset.title, parseInt(btn.dataset.year, 10));
+    const qb = e.target.closest('.queue-btn');
+    if (qb) { queueTrack(qb.dataset.artist, qb.dataset.title, parseInt(qb.dataset.year, 10)); return; }
+    const fb = e.target.closest('.fav-btn');
+    if (fb) toggleFavorite(fb.dataset.artist, fb.dataset.title, parseInt(fb.dataset.year, 10));
   });
 
   async function queueTrack(artist, title, year) {
@@ -568,6 +656,170 @@
       toast(`Kicked ${ip}`, 'ok');
       setTimeout(refreshListeners, 600);
     } catch(e) { toast('Kick failed: ' + e.message, 'err'); }
+  }
+
+  // ── User favorites ───────────────────────────────────────────────────────
+  let userFavSet = new Set();   // "artist:title" keys
+
+  function _favKey(artist, title) { return `${artist}:${title}`; }
+  function isFav(artist, title)   { return userFavSet.has(_favKey(artist, title)); }
+
+  async function loadUserFavorites() {
+    try {
+      const favs = await fetch('/api/favorites/user').then(r => r.json());
+      userFavSet = new Set(favs.map(f => _favKey(f.artist, f.title)));
+      renderUserFavorites(favs);
+    } catch(e) {
+      document.getElementById('user-fav-panel').innerHTML =
+        '<div class="no-favs">Could not load favorites</div>';
+    }
+  }
+
+  function renderUserFavorites(favs) {
+    const panel = document.getElementById('user-fav-panel');
+    if (!favs.length) {
+      panel.innerHTML = '<div class="no-favs">No favorites yet — star a song in the queue browser</div>';
+      return;
+    }
+    panel.innerHTML = `<div class="fav-list">${favs.map(f => `
+      <div class="fav-item">
+        <div class="fav-item-info">
+          <span class="fav-title">${esc(f.title)}</span>
+          <span class="fav-artist">${esc(f.artist)} · ${f.year}</span>
+        </div>
+        <button class="fav-remove"
+          data-artist="${esc(f.artist)}"
+          data-title="${esc(f.title)}">✕</button>
+      </div>`).join('')}</div>`;
+  }
+
+  document.getElementById('user-fav-panel').addEventListener('click', async e => {
+    const btn = e.target.closest('.fav-remove');
+    if (!btn) return;
+    await removeFavorite(btn.dataset.artist, btn.dataset.title);
+  });
+
+  async function toggleFavorite(artist, title, year) {
+    if (isFav(artist, title)) {
+      await removeFavorite(artist, title);
+    } else {
+      await addFavorite(artist, title, year);
+    }
+  }
+
+  async function addFavorite(artist, title, year) {
+    try {
+      await api('POST', '/api/favorites/user/add', { artist, title, year });
+      toast(`★ Added: ${artist} — ${title}`, 'ok');
+      await loadUserFavorites();
+      if (selectedArtist) selectArtist(selectedArtist); // refresh star states
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  async function removeFavorite(artist, title) {
+    try {
+      await api('POST', '/api/favorites/user/remove', { artist, title });
+      toast(`Removed: ${artist} — ${title}`, 'ok');
+      await loadUserFavorites();
+      if (selectedArtist) selectArtist(selectedArtist);
+    } catch(e) { toast('Error: ' + e.message, 'err'); }
+  }
+
+  // ── DJ favorites ──────────────────────────────────────────────────────────
+  const DJ_SLOTS = ['favorites','morning','midday','afternoon','evening','night'];
+  let djFavData  = {};      // { DJName: { slot: [...] } }
+  let activeSlot = {};      // { DJName: slotName }
+
+  async function loadDJFavorites() {
+    const djs = statusData.dj_names || [];
+    if (!djs.length) return;
+    const panel = document.getElementById('dj-fav-panel');
+    panel.innerHTML = '';
+
+    for (const name of djs) {
+      try {
+        const data = await fetch(`/api/favorites/dj/${encodeURIComponent(name)}`).then(r => r.json());
+        djFavData[name] = data;
+        activeSlot[name] = activeSlot[name] || 'favorites';
+      } catch(e) {
+        djFavData[name] = {};
+      }
+      panel.appendChild(_buildDJFavSection(name));
+    }
+
+    if (!panel.children.length)
+      panel.innerHTML = '<div class="no-favs">No DJ favorites generated yet — favorites are generated automatically on first run.</div>';
+  }
+
+  function _buildDJFavSection(name) {
+    const div = document.createElement('div');
+    div.className = 'dj-fav-section';
+    div.id = `dj-fav-${name}`;
+
+    const data  = djFavData[name] || {};
+    const slot  = activeSlot[name] || 'favorites';
+    const tracks = data[slot] || [];
+    const hasAny = DJ_SLOTS.some(s => (data[s] || []).length > 0);
+
+    div.innerHTML = `
+      <div class="dj-fav-header">
+        <span class="dj-fav-name">${esc(name)}</span>
+        <button class="regen-btn" id="regen-${esc(name)}"
+          onclick="regenDJFavorites('${esc(name)}')">↺ Regenerate</button>
+      </div>
+      ${hasAny ? `
+        <div class="slot-tabs">
+          ${DJ_SLOTS.map(s => `
+            <button class="slot-tab${s===slot?' active':''}"
+              data-dj="${esc(name)}" data-slot="${s}">${s}</button>
+          `).join('')}
+        </div>
+        <div class="slot-tracks" id="slot-tracks-${esc(name)}">
+          ${tracks.length
+            ? tracks.map(t => `<span class="slot-track"><strong>${esc(t.artist)}</strong> — ${esc(t.title)} <span style="color:var(--dim)">(${t.year})</span></span>`).join('')
+            : '<span class="no-favs">No tracks in this slot</span>'}
+        </div>
+      ` : '<div class="no-favs">Not generated yet — will appear after first run or regenerate.</div>'}`;
+
+    // Slot tab clicks (delegated on the section)
+    div.addEventListener('click', e => {
+      const tab = e.target.closest('.slot-tab');
+      if (!tab) return;
+      const dj = tab.dataset.dj, s = tab.dataset.slot;
+      activeSlot[dj] = s;
+      // Refresh just this section
+      const sec = document.getElementById(`dj-fav-${dj}`);
+      if (sec) sec.replaceWith(_buildDJFavSection(dj));
+    });
+
+    return div;
+  }
+
+  async function regenDJFavorites(name) {
+    const btn = document.getElementById(`regen-${name}`);
+    if (btn) { btn.disabled = true; btn.textContent = '…regenerating'; }
+    try {
+      await api('POST', `/api/favorites/dj/${encodeURIComponent(name)}/regenerate`);
+      toast(`${name}'s favorites are regenerating in the background`, 'ok');
+      // Poll until data changes (up to 5 min)
+      let tries = 0;
+      const poll = setInterval(async () => {
+        tries++;
+        const data = await fetch(`/api/favorites/dj/${encodeURIComponent(name)}`).then(r=>r.json());
+        const hasData = DJ_SLOTS.some(s => (data[s]||[]).length > 0);
+        if (hasData || tries > 60) {
+          clearInterval(poll);
+          djFavData[name] = data;
+          const sec = document.getElementById(`dj-fav-${name}`);
+          if (sec) sec.replaceWith(_buildDJFavSection(name));
+          if (btn) { btn.disabled = false; btn.textContent = '↺ Regenerate'; }
+          if (hasData) toast(`${name}'s favorites ready`, 'ok');
+        }
+      }, 5000);
+    } catch(e) {
+      toast('Error: ' + e.message, 'err');
+      if (btn) { btn.disabled = false; btn.textContent = '↺ Regenerate'; }
+    }
   }
 
   // ── Live context ──────────────────────────────────────────────────────────
@@ -678,6 +930,9 @@
   refreshTargets();
   setInterval(refreshTargets, 8000);
   loadLibrary();
+  loadUserFavorites();
+  // Load DJ favorites once status (which has dj_names) is available
+  setTimeout(async () => { await refreshStatus(); loadDJFavorites(); }, 500);
 </script>
 </body>
 </html>
