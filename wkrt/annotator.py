@@ -15,7 +15,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import quote
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 log = logging.getLogger(__name__)
@@ -27,21 +27,20 @@ _rate_lock    = threading.Lock()
 _last_request = 0.0
 
 
-def _mb_get(path: str) -> dict:
-    """One rate-limited, authenticated MusicBrainz GET. Returns parsed JSON."""
+def _mb_get(params: dict) -> dict:
+    """One rate-limited MusicBrainz GET. Params dict is urlencode'd cleanly."""
     global _last_request
     with _rate_lock:
         gap = time.monotonic() - _last_request
         if gap < 1.05:
             time.sleep(1.05 - gap)
-        req = Request(
-            f"{_MB_BASE}{path}",
-            headers={"User-Agent": _USER_AGENT, "Accept": "application/json"},
-        )
-        with urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-        _last_request = time.monotonic()
-    return data
+        url = f"{_MB_BASE}/recording?{urlencode(params)}"
+        req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
+        try:
+            with urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+        finally:
+            _last_request = time.monotonic()
 
 
 def _norm_filename(s: str) -> str:
@@ -77,8 +76,8 @@ class Annotator:
 
         now = datetime.now(timezone.utc).isoformat()
         try:
-            q = f'recording:"{quote(title)}" AND artist:"{quote(artist)}"'
-            data = _mb_get(f"/recording?query={q}&fmt=json&limit=5")
+            q = f'recording:"{title}" AND artist:"{artist}"'
+            data = _mb_get({"query": q, "fmt": "json", "limit": 5})
             recordings = data.get("recordings", [])
 
             if not recordings or recordings[0].get("score", 0) < 60:
@@ -126,7 +125,7 @@ class Annotator:
             return annotation
 
         except Exception as e:
-            log.debug(f"MusicBrainz fetch failed for {artist} — {title}: {e}")
+            log.warning(f"MusicBrainz fetch failed for {artist} — {title}: {e}")
             return None
 
     def fetch_library(self, library: dict):
