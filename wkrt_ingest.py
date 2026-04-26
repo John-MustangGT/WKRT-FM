@@ -16,7 +16,9 @@ Usage:
   python wkrt_ingest.py --music-dir /mnt/music  # custom music library root
 """
 import argparse
+import base64
 import json
+import os
 import re
 import shutil
 import sys
@@ -38,6 +40,25 @@ except ImportError:
 AUDIO_EXTENSIONS = {".mp3", ".flac", ".m4a", ".ogg", ".wav"}
 STABLE_SECS = 2      # seconds of unchanged size before we consider a file complete
 STABLE_POLLS = 5     # number of size checks before declaring stability
+
+
+def load_admin_password() -> str:
+    """Read admin password: env var → settings.toml → empty (no auth)."""
+    env = os.environ.get("WKRT_ADMIN_PASSWORD", "")
+    if env:
+        return env
+    cfg_path = Path(__file__).parent / "config" / "settings.toml"
+    if cfg_path.exists():
+        try:
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib  # type: ignore
+            data = tomllib.loads(cfg_path.read_text())
+            return data.get("web", {}).get("admin_password", "")
+        except Exception:
+            pass
+    return ""
 
 
 def wait_stable(path: Path, timeout: int = 60) -> bool:
@@ -86,13 +107,17 @@ def infer_year(path: Path) -> int | None:
     return None
 
 
-def notify_station(api_url: str, paths: list[str]) -> int:
+def notify_station(api_url: str, paths: list[str], password: str = "") -> int:
     """POST paths to the station API. Returns number of tracks the engine accepted."""
     payload = json.dumps({"paths": paths}).encode()
+    headers = {"Content-Type": "application/json"}
+    if password:
+        creds = base64.b64encode(f"admin:{password}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
     req = Request(
         f"{api_url.rstrip('/')}/api/library/ingest",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -183,8 +208,9 @@ def main():
             print(f"Nothing ingested. {len(skipped)} file(s) skipped.")
         sys.exit(0)
 
+    password = load_admin_password()
     print(f"Moved {len(moved)} file(s). Notifying station at {args.api}...")
-    n = notify_station(args.api, moved)
+    n = notify_station(args.api, moved, password)
     if n:
         print(f"Hot-added {n} track(s) to the DJ's crate — "
               f"they'll get a special on-air introduction.")
