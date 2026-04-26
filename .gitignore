@@ -15,3 +15,5 @@ new_music/*
 !new_music/.gitkeep
 wkrt_library.json
 shopping_list.txt
+config/favorites_*.json
+config/annotations/*
