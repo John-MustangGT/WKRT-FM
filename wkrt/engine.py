@@ -39,6 +39,7 @@ from .state import StationState
 from .web import WebServer
 from .context import StationContext
 from .programmer import DJProgrammer, current_time_slot
+from .annotator import Annotator
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -103,9 +104,10 @@ class WKRTEngine:
 
         self._force_dj = threading.Event()
 
-        # DJ block programmer
+        # DJ block programmer + annotation cache
         base = Path(__file__).parent.parent
         self._programmer = DJProgrammer(self.cfg, base / "config")
+        self._annotator  = Annotator(base / "config")
         self._programmed_block: list[Track] = []
         self._block_lock = threading.Lock()
         self._refilling  = threading.Event()
@@ -169,6 +171,12 @@ class WKRTEngine:
         # Generate DJ favorites + first programmed block in background
         threading.Thread(
             target=self._initial_block_worker, daemon=True, name="initial-block"
+        ).start()
+
+        # Annotate library from MusicBrainz in background (1 req/sec, ~2 min for 137 tracks)
+        threading.Thread(
+            target=self._annotator.fetch_library, args=(self._library,),
+            daemon=True, name="mb-annotate",
         ).start()
 
         # Start web UI — listener panel uses the first target with admin_password
@@ -316,11 +324,17 @@ class WKRTEngine:
                 if crate_incoming:
                     next_track.from_crate = False  # consumed — won't re-trigger on replay
 
-                ctx = self.context.get() or {}
+                ctx = dict(self.context.get() or {})
                 live = self.state.pop_live_context()
                 if live:
-                    ctx = dict(ctx)
                     ctx["live_context"] = live
+                prev_ann = self._annotator.load(track.artist, track.title)
+                if prev_ann:
+                    ctx["prev_annotation"] = prev_ann
+                if next_track:
+                    next_ann = self._annotator.load(next_track.artist, next_track.title)
+                    if next_ann:
+                        ctx["next_annotation"] = next_ann
 
                 script = active_engine.generate(
                     prev_track=track,
@@ -698,6 +712,11 @@ class WKRTEngine:
                 f"[yellow]{track.title}[/yellow] [dim]({track.year})[/dim]"
             )
             added.append(track)
+            threading.Thread(
+                target=self._annotator.fetch,
+                args=(track.artist, track.title),
+                daemon=True, name=f"mb-{track.title[:20]}",
+            ).start()
 
         if added:
             self._programmer.record_ingest()

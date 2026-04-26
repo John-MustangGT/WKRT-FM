@@ -239,6 +239,26 @@ class DJEngine:
                 "don't force it every time:\n" + "\n".join(ctx_lines)
             )
 
+        # Verified MusicBrainz facts — only for clip types that reference specific tracks
+        _track_clips = {
+            ClipType.BETWEEN_TRACKS, ClipType.TRIVIA,
+            ClipType.DEDICATION, ClipType.NEW_ARRIVAL,
+        }
+        if clip_type in _track_clips and context:
+            from .annotator import Annotator
+            fact_lines = []
+            fact_lines += Annotator.format_for_prompt(
+                context.get("prev_annotation"), "Song just played"
+            )
+            fact_lines += Annotator.format_for_prompt(
+                context.get("next_annotation"), "Song coming up"
+            )
+            if fact_lines:
+                prompt += (
+                    "\n\nVerified track facts (use these — don't invent details not listed here):\n"
+                    + "\n".join(f"- {l}" for l in fact_lines)
+                )
+
         if context and context.get("live_context"):
             prompt += (
                 "\n\nBREAKING — work this into your next break, make it feel live and immediate:\n"

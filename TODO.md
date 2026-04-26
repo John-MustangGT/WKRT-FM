@@ -222,7 +222,7 @@ Then injected into `between_tracks` and `trivia` prompts automatically.
 
 ---
 
-## Song Annotation (richer DJ facts)
+## ✅ Song Annotation (richer DJ facts) — DONE
 
 Pre-fetch real metadata per track so DJs have accurate facts, not hallucinated ones.
 
