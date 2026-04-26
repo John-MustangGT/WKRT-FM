@@ -21,6 +21,16 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 
+_DEFAULT_AUDIO_FILTERS = [
+    # Remove subsonic rumble (below 40 Hz adds nothing on FM, wastes headroom)
+    "highpass=f=40",
+    # Gentle broadcast-style compression: tame peaks, even out dynamics
+    "acompressor=threshold=-18dB:ratio=3:attack=5:release=50:makeup=2",
+    # EBU R128 loudness normalization: -16 LUFS target, -1.5 dBTP ceiling
+    "loudnorm=I=-16:TP=-1.5:LRA=11",
+]
+
+
 class Mixer:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -30,6 +40,9 @@ class Mixer:
         self.fade_out_s = cfg["playlist"]["fade_out_seconds"]
         self.talkover_s = cfg["playlist"].get("dj_talkover_seconds", 8)
         self.trim_silence = cfg["playlist"].get("trim_silence", True)
+        self.audio_filters: list[str] = (
+            self.output_cfg.get("audio_filters") or _DEFAULT_AUDIO_FILTERS
+        )
         self.spool_dir.mkdir(parents=True, exist_ok=True)
 
         self._ffmpeg = shutil.which("ffmpeg")
@@ -80,17 +93,24 @@ class Mixer:
 
         try:
             # acrossfade filter: overlap last N seconds of a with first N of b
+            af_str = ",".join(self.audio_filters)
+            cf_out = "out"
             filter_complex = (
                 f"[0:a]atrim=0:{trim_end + cf},asetpts=PTS-STARTPTS[a];"
                 f"[1:a]atrim=0:{cf * 3},asetpts=PTS-STARTPTS[b];"
-                f"[a][b]acrossfade=d={cf}:c1=exp:c2=exp[out]"
+                f"[a][b]acrossfade=d={cf}:c1=exp:c2=exp[crossed]"
             )
+            if af_str:
+                filter_complex += f";[crossed]{af_str}[{cf_out}]"
+            else:
+                cf_out = "crossed"
+
             cmd = [
                 self._ffmpeg, "-y",
                 "-i", str(track_a),
                 "-i", str(track_b),
                 "-filter_complex", filter_complex,
-                "-map", "[out]",
+                "-map", f"[{cf_out}]",
                 "-b:a", self.output_cfg["bitrate"],
                 "-ar", str(self.output_cfg["sample_rate"]),
                 "-ac", str(self.output_cfg["channels"]),
@@ -129,19 +149,26 @@ class Mixer:
         #   - Fade out the track over the talkover window
         #   - Prepend silence to the DJ clip so it starts at fade_start
         #   - Mix both streams (normalize=0 keeps natural levels)
+        #   - Apply broadcast audio filter chain to final output
+        af_str = ",".join(self.audio_filters)
+        mix_out = "out"
         filter_complex = (
             f"[0:a]afade=t=out:st={fade_start:.3f}:d={talkover:.3f}[tfade];"
             f"aevalsrc=0:d={fade_start:.3f}:s=44100:c=stereo[silence];"
             f"[silence][1:a]concat=n=2:v=0:a=1[dj_delayed];"
-            f"[tfade][dj_delayed]amix=inputs=2:duration=longest:normalize=0[out]"
+            f"[tfade][dj_delayed]amix=inputs=2:duration=longest:normalize=0[mixed]"
         )
+        if af_str:
+            filter_complex += f";[mixed]{af_str}[{mix_out}]"
+        else:
+            mix_out = "mixed"
 
         cmd = [
             self._ffmpeg, "-y",
             "-i", str(track_path),
             "-i", str(dj_path),
             "-filter_complex", filter_complex,
-            "-map", "[out]",
+            "-map", f"[{mix_out}]",
             "-b:a", self.output_cfg["bitrate"],
             "-ar", str(self.output_cfg["sample_rate"]),
             "-ac", str(self.output_cfg["channels"]),
@@ -156,19 +183,25 @@ class Mixer:
         fade_start = max(0, dur - self.fade_out_s)
         silence_pad = 0.4
 
+        af_str = ",".join(self.audio_filters)
+        seq_out = "out"
         filter_complex = (
             f"[0:a]afade=t=out:st={fade_start}:d={self.fade_out_s}[track_faded];"
             f"aevalsrc=0:d={silence_pad}:s=44100:c=stereo[pad];"
             f"[1:a]asetpts=PTS-STARTPTS[dj];"
-            f"[track_faded][pad][dj]concat=n=3:v=0:a=1[out]"
+            f"[track_faded][pad][dj]concat=n=3:v=0:a=1[concat]"
         )
+        if af_str:
+            filter_complex += f";[concat]{af_str}[{seq_out}]"
+        else:
+            seq_out = "concat"
 
         cmd = [
             self._ffmpeg, "-y",
             "-i", str(track_path),
             "-i", str(dj_path),
             "-filter_complex", filter_complex,
-            "-map", "[out]",
+            "-map", f"[{seq_out}]",
             "-b:a", self.output_cfg["bitrate"],
             "-ar", str(self.output_cfg["sample_rate"]),
             "-ac", str(self.output_cfg["channels"]),
@@ -178,10 +211,11 @@ class Mixer:
         return dur + silence_pad
 
     def _process_track_only(self, track_path: Path, out_path: Path):
-        """Normalize and copy track with no DJ clip."""
-        cmd = [
-            self._ffmpeg, "-y",
-            "-i", str(track_path),
+        """Transcode track with broadcast audio filter chain, no DJ clip."""
+        cmd = [self._ffmpeg, "-y", "-i", str(track_path)]
+        if self.audio_filters:
+            cmd += ["-af", ",".join(self.audio_filters)]
+        cmd += [
             "-b:a", self.output_cfg["bitrate"],
             "-ar", str(self.output_cfg["sample_rate"]),
             "-ac", str(self.output_cfg["channels"]),
@@ -190,16 +224,14 @@ class Mixer:
         self._run(cmd)
 
     def make_fade_in(self, track_path: Path, segment_name: str) -> Path:
-        """
-        Apply a short fade-in to a track (used for first track after DJ clip).
-        """
+        """Apply a short fade-in to a track (used for first track after DJ clip)."""
         out_path = self.spool_dir / f"{segment_name}_fadein.mp3"
         fi = self.crossfade_s
-
+        af_parts = [f"afade=t=in:st=0:d={fi}"] + self.audio_filters
         cmd = [
             self._ffmpeg, "-y",
             "-i", str(track_path),
-            "-af", f"afade=t=in:st=0:d={fi}",
+            "-af", ",".join(af_parts),
             "-b:a", self.output_cfg["bitrate"],
             "-ar", str(self.output_cfg["sample_rate"]),
             "-ac", str(self.output_cfg["channels"]),

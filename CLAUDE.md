@@ -165,6 +165,27 @@ The track detail panel in both the listener page and admin page displays this hi
 
 Crate picks are regenerated automatically ~35 minutes after a crate update (detected via `config/library_state.json` `last_ingest` timestamp). Manual regeneration is available via the admin page.
 
+### Audio filter chain
+
+Every segment passes through a configurable ffmpeg audio filter chain before being written to spool. The chain is applied to all output paths: talkover segments, crossfades, and bare tracks.
+
+Default chain (set in `[output]` of `settings.toml`, or falls back to these if absent):
+
+```toml
+[output]
+audio_filters = [
+  "highpass=f=40",
+  "acompressor=threshold=-18dB:ratio=3:attack=5:release=50:makeup=2",
+  "loudnorm=I=-16:TP=-1.5:LRA=11",
+]
+```
+
+- `highpass=f=40` — strips subsonic rumble below 40 Hz
+- `acompressor` — gentle broadcast-style dynamic compression (3:1 ratio, 5 ms attack)
+- `loudnorm` — EBU R128 loudness normalization to -16 LUFS, -1.5 dBTP true peak ceiling
+
+To disable processing entirely set `audio_filters = []`. To add StereoTool or other external processors, pipe through them before or after this chain or replace the list entirely.
+
 ### Spool and caching
 
 - **Spool** (`spool/`): pre-stitched MP3 segments named `seg_<index>_<year>_<artist>.mp3`. Cleaned to the 15 most recent every 10 tracks.

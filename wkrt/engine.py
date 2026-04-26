@@ -261,6 +261,12 @@ class WKRTEngine:
                 self.state.set_dj_script(first_dj_text)
             self._play(first_segment, self.current_track, first_dj_at)
 
+            # Inject top-of-hour station ID at the first track boundary after :00
+            toh_clip = self.toh.get_top_of_hour()
+            if toh_clip:
+                log.info("Injecting top-of-hour station ID")
+                self._play_clip(toh_clip)
+
             # Inject connect ID at the next natural break if a listener just tuned in
             if self._connect_id_pending.is_set():
                 self._connect_id_pending.clear()
