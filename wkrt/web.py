@@ -27,6 +27,7 @@ Routes:
   GET  /api/track              → full track detail (id3, annotation, history, art)  [public]
   GET  /api/dj-stats           → per-DJ API call/token/latency stats  [auth required]
   POST /api/dj-stats/reset     → clear all accumulated stats  [auth required]
+  GET  /metrics                → Prometheus text exposition format  [public]
 """
 import base64
 import json
@@ -42,6 +43,19 @@ from urllib.request import Request, urlopen
 log = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+
+
+def _prom_labels(labels: dict | None) -> str:
+    if not labels:
+        return ""
+    parts = ','.join(f'{k}="{str(v).replace(chr(34), chr(39))}"' for k, v in labels.items())
+    return "{" + parts + "}"
+
+
+def _prom_val(v) -> str:
+    if isinstance(v, float):
+        return f"{v:.3f}"
+    return str(int(v))
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -77,7 +91,11 @@ class _Handler(BaseHTTPRequestHandler):
     # ── GET ──────────────────────────────────────────────────────────────────
 
     def do_GET(self):
-        if self.path == "/":
+        if self.path == "/metrics":
+            body = self._render_metrics().encode()
+            self._respond(200, "text/plain; version=0.0.4; charset=utf-8", body)
+            return
+        elif self.path == "/":
             self._serve_file(_TEMPLATE_DIR / "index.html", "text/html; charset=utf-8")
         elif self.path == "/admin":
             if not self._require_admin():
@@ -295,6 +313,128 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(404, "text/plain", b"Not found")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _render_metrics(self) -> str:
+        """Render all station metrics in Prometheus text exposition format (v0.0.4)."""
+        lines: list[str] = []
+
+        def g(name, help_text, value, labels: dict | None = None):
+            """Emit a single gauge metric line."""
+            lstr = _prom_labels(labels)
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} gauge")
+            lines.append(f"{name}{lstr} {_prom_val(value)}")
+
+        def c(name, help_text, rows: list[tuple]):
+            """Emit a counter with multiple label sets. rows = [(labels_dict, value), ...]"""
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} counter")
+            for labels, value in rows:
+                lines.append(f"{name}{_prom_labels(labels)} {_prom_val(value)}")
+
+        state = self.state.to_dict() if self.state else {}
+
+        # ── Station ──────────────────────────────────────────────────────────
+        station_cfg = {}
+        if self.engine:
+            station_cfg = self.engine.cfg.get("station", {})
+        g("wkrt_info", "Station metadata (always 1)", 1, {
+            "call_sign": station_cfg.get("call_sign", "WKRT"),
+            "frequency": station_cfg.get("frequency", "104.7"),
+            "city":      station_cfg.get("city", ""),
+        })
+        g("wkrt_listeners", "Current listener count", state.get("listener_count", 0))
+        g("wkrt_tracks_played_total",
+          "Total tracks played since startup",
+          self.engine.track_count if self.engine else 0)
+
+        _cache_states = {"COLD": 0, "WARMING": 1, "WARM": 2, "RUNNING": 3, "COOLING": 4}
+        g("wkrt_cache_state",
+          "Warmup state (0=COLD 1=WARMING 2=WARM 3=RUNNING 4=COOLING)",
+          _cache_states.get(state.get("cache_state", "COLD"), 0))
+
+        # ── Stream targets ────────────────────────────────────────────────────
+        if self.engine:
+            targets = self.engine.target_statuses()
+            g("wkrt_stream_targets_configured",
+              "Number of configured stream targets", len(targets))
+            c("wkrt_stream_target_connected",
+              "Whether a stream target is actively connected (1=yes 0=no)",
+              [
+                  ({"name": t["name"], "host": t["host"],
+                    "mount": t["mount"], "codec": t["codec"]},
+                   1 if t["connected"] else 0)
+                  for t in targets
+              ])
+            c("wkrt_stream_target_enabled",
+              "Whether a stream target is enabled (1=yes 0=no)",
+              [
+                  ({"name": t["name"]}, 1 if t["enabled"] else 0)
+                  for t in targets
+              ])
+
+        # ── DJ API stats ──────────────────────────────────────────────────────
+        if self.engine:
+            dj_data  = self.engine._dj_stats.to_dict()
+            engines  = self.engine._dj_engines
+
+            c("wkrt_dj_api_calls_total",
+              "Claude API calls made per DJ",
+              [({  "dj": n}, s["api_calls"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_input_tokens_total",
+              "Claude API input tokens consumed per DJ",
+              [({ "dj": n}, s["input_tokens"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_output_tokens_total",
+              "Claude API output tokens generated per DJ",
+              [({ "dj": n}, s["output_tokens"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_api_latency_ms_total",
+              "Cumulative Claude API call latency in milliseconds per DJ",
+              [({ "dj": n}, s["total_latency_ms"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_fallbacks_total",
+              "Times the DJ fell back to canned script due to API failure",
+              [({ "dj": n}, s["fallbacks"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_tts_calls_total",
+              "TTS synthesis calls per DJ",
+              [({ "dj": n}, s["tts_calls"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_tts_latency_ms_total",
+              "Cumulative TTS synthesis latency in milliseconds per DJ",
+              [({ "dj": n}, s["total_tts_ms"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_segment_calls_total",
+              "Segment build calls per DJ",
+              [({ "dj": n}, s["segment_calls"]) for n, s in dj_data.items()])
+
+            c("wkrt_dj_segment_latency_ms_total",
+              "Cumulative segment build latency in milliseconds per DJ",
+              [({ "dj": n}, s["total_segment_ms"]) for n, s in dj_data.items()])
+
+            # Per-clip-type breakdown
+            clip_rows = []
+            for name, s in dj_data.items():
+                for clip_type, count in s.get("clip_types", {}).items():
+                    clip_rows.append(({"dj": name, "clip_type": clip_type}, count))
+            if clip_rows:
+                c("wkrt_dj_clip_type_total",
+                  "Clips generated by type per DJ",
+                  clip_rows)
+
+            # Live API health from engine (not from persisted stats)
+            lines.append("# HELP wkrt_dj_api_healthy Whether DJ Claude API is healthy (1=yes 0=no)")
+            lines.append("# TYPE wkrt_dj_api_healthy gauge")
+            for dj_cfg in self.engine._dj_configs:
+                n   = dj_cfg["name"]
+                eng = engines.get(n)
+                val = 1 if (eng and eng.is_api_healthy) else 0
+                lines.append(f'wkrt_dj_api_healthy{{dj="{n}"}} {val}')
+
+        lines.append("")   # trailing newline
+        return "\n".join(lines)
 
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", 0))
