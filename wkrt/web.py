@@ -25,7 +25,7 @@ Routes:
   GET  /api/favorites/dj/{name}     → DJ favorites by slot  [auth required]
   POST /api/favorites/dj/{name}/regenerate  [auth required]
   GET  /api/track              → full track detail (id3, annotation, history, art)  [public]
-  GET  /api/dj-stats           → per-DJ API call/token/latency stats  [auth required]
+  GET  /api/dj-stats           → per-DJ API call/token/latency stats  [public]
   POST /api/dj-stats/reset     → clear all accumulated stats  [auth required]
   GET  /metrics                → Prometheus text exposition format  [public]
 """
@@ -143,8 +143,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(200, "application/json", json.dumps(data).encode())
 
         elif self.path == "/api/dj-stats":
-            if not self._require_admin():
-                return
             if not self.engine:
                 return self._respond(503, "text/plain", b"Engine not available")
             stats = self.engine._dj_stats.to_dict()
