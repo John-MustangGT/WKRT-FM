@@ -41,6 +41,7 @@ from .context import StationContext
 from .programmer import DJProgrammer, current_time_slot
 from .annotator import Annotator
 from .history import PlayHistory
+from .dj_stats import DJStats
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -77,10 +78,13 @@ class WKRTEngine:
         self._dj_configs: list[dict] = self.cfg.get("djs", [])
         if not self._dj_configs:
             raise RuntimeError("No [[djs]] entries found in settings.toml")
+        base = Path(__file__).parent.parent
+        self._dj_stats = DJStats(base / "config")
         self._dj_engines: dict[str, DJEngine] = {
-            dj_cfg["name"]: DJEngine(self.cfg, dj_cfg)
+            dj_cfg["name"]: DJEngine(self.cfg, dj_cfg, stats=self._dj_stats)
             for dj_cfg in self._dj_configs
         }
+        self._fallback_clips: dict[str, Path] = {}   # dj_name → pre-baked TTS path
         self._current_dj_name: Optional[str] = None
         self._dj_override: Optional[str] = None
         self._dj_override_lock = threading.Lock()
@@ -106,7 +110,6 @@ class WKRTEngine:
         self._force_dj = threading.Event()
 
         # DJ block programmer + annotation cache
-        base = Path(__file__).parent.parent
         self._programmer = DJProgrammer(self.cfg, base / "config")
         self._annotator  = Annotator(base / "config")
         self._history    = PlayHistory(base / "config")
@@ -179,6 +182,11 @@ class WKRTEngine:
         threading.Thread(
             target=self._annotator.fetch_library, args=(self._library,),
             daemon=True, name="mb-annotate",
+        ).start()
+
+        # Pre-generate per-DJ "station on automatic" fallback clips (TTS only)
+        threading.Thread(
+            target=self._make_fallback_clips, daemon=True, name="fallback-clips",
         ).start()
 
         # Start web UI — listener panel uses the first target with admin_password
@@ -319,6 +327,8 @@ class WKRTEngine:
             or (self.dj_every > 0 and self.track_count % self.dj_every == 0)
         )
 
+        seg_t0 = time.perf_counter()
+
         if insert_dj:
             try:
                 active_engine = self._dj_engines[dj_cfg["name"]]
@@ -326,31 +336,50 @@ class WKRTEngine:
                 if crate_incoming:
                     next_track.from_crate = False  # consumed — won't re-trigger on replay
 
-                ctx = dict(self.context.get() or {})
-                live = self.state.pop_live_context()
-                if live:
-                    ctx["live_context"] = live
-                prev_ann = self._annotator.load(track.artist, track.title)
-                if prev_ann:
-                    ctx["prev_annotation"] = prev_ann
-                if next_track:
-                    next_ann = self._annotator.load(next_track.artist, next_track.title)
-                    if next_ann:
-                        ctx["next_annotation"] = next_ann
+                # When API is degraded, use the pre-made fallback clip instead
+                if not active_engine.is_api_healthy and not active_engine.should_retry_api():
+                    fallback = self._fallback_clips.get(dj_cfg["name"])
+                    if fallback and fallback.exists():
+                        dj_clip_path = fallback
+                        dj_text = "[automatic mode]"
+                        log.info(f"API unhealthy — playing fallback clip for {dj_cfg['name']}")
+                else:
+                    ctx = dict(self.context.get() or {})
+                    live = self.state.pop_live_context()
+                    if live:
+                        ctx["live_context"] = live
+                    prev_ann = self._annotator.load(track.artist, track.title)
+                    if prev_ann:
+                        ctx["prev_annotation"] = prev_ann
+                    if next_track:
+                        next_ann = self._annotator.load(next_track.artist, next_track.title)
+                        if next_ann:
+                            ctx["next_annotation"] = next_ann
 
-                script = active_engine.generate(
-                    prev_track=track,
-                    next_track=next_track,
-                    force_type=force_type,
-                    context=ctx,
-                )
-                self._print_dj(script.text, dj_cfg["name"])
-                dj_text = script.text
-                dj_clip_path = self.tts.synthesize(script.text, dj_cfg)
+                    script = active_engine.generate(
+                        prev_track=track,
+                        next_track=next_track,
+                        force_type=force_type,
+                        context=ctx,
+                    )
+                    self._print_dj(script.text, dj_cfg["name"])
+                    dj_text = script.text
+
+                    tts_t0 = time.perf_counter()
+                    dj_clip_path = self.tts.synthesize(script.text, dj_cfg)
+                    self._dj_stats.record_tts(
+                        dj_cfg["name"],
+                        (time.perf_counter() - tts_t0) * 1000,
+                    )
+
             except Exception as e:
                 log.error(f"DJ generation failed: {e}")
 
         seg_path, dj_at = self.mixer.make_segment(track.path, dj_clip_path, segment_name)
+        self._dj_stats.record_segment(
+            dj_cfg["name"],
+            (time.perf_counter() - seg_t0) * 1000,
+        )
         return seg_path, dj_at, dj_text
 
     # ── Multi-target streaming ────────────────────────────────────────────────
@@ -621,6 +650,25 @@ class WKRTEngine:
                     self.regenerate_dj_favorites(dj_cfg["name"])
             except Exception as e:
                 log.error(f"Regen watcher error: {e}")
+
+    def _make_fallback_clips(self):
+        """Pre-synthesize one 'station on automatic' TTS clip per DJ at startup."""
+        station = self.cfg["station"]
+        cs   = station.get("call_sign", "WKRT")
+        freq = station.get("frequency", "104.7")
+        for dj_cfg in self._dj_configs:
+            name = dj_cfg["name"]
+            text = (
+                f"Hey, this is {name} on {cs} {freq}. "
+                f"We're running on automatic for a bit — technical issues in the booth. "
+                f"The hits keep rolling. I'll be back before you know it."
+            )
+            try:
+                path = self.tts.synthesize(text, dj_cfg)
+                self._fallback_clips[name] = path
+                log.info(f"Fallback clip ready for {name}: {path.name}")
+            except Exception as e:
+                log.warning(f"Could not pre-generate fallback clip for {name}: {e}")
 
     # ── DJ rotation ───────────────────────────────────────────────────────────
 

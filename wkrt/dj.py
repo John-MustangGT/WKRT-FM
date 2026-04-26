@@ -6,6 +6,7 @@ Returns plain text scripts ready for TTS.
 import datetime
 import random
 import logging
+import time
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
@@ -141,8 +142,12 @@ def _select_clip_type(weights: dict) -> ClipType:
     return ClipType(chosen)
 
 
+_API_FAILURE_THRESHOLD = 3       # consecutive failures before marking unhealthy
+_API_RETRY_INTERVAL   = 300.0   # seconds before retrying after going unhealthy
+
+
 class DJEngine:
-    def __init__(self, cfg: dict, dj_cfg: dict):
+    def __init__(self, cfg: dict, dj_cfg: dict, stats=None):
         self.cfg = cfg
         self.dj_cfg = dj_cfg
         self.name = dj_cfg["name"]
@@ -152,6 +157,24 @@ class DJEngine:
         self.station = cfg["station"]
         self.clip_weights = dj_cfg["clip_types"]
         self.timezone = cfg["station"].get("timezone", "UTC")
+        self._stats = stats
+
+        # API health tracking
+        self._consecutive_failures = 0
+        self._api_healthy = bool(api_key)
+        self._unhealthy_since: Optional[float] = None   # monotonic timestamp
+
+    @property
+    def is_api_healthy(self) -> bool:
+        return self._api_healthy
+
+    def should_retry_api(self) -> bool:
+        """True if we should attempt an API call even when marked unhealthy."""
+        if self._api_healthy:
+            return True
+        if self._unhealthy_since is None:
+            return True
+        return time.monotonic() - self._unhealthy_since >= _API_RETRY_INTERVAL
 
     def generate(
         self,
@@ -173,7 +196,7 @@ class DJEngine:
             clip_type = ClipType.STATION_ID
 
         prompt = self._build_prompt(clip_type, prev_track, next_track, context)
-        text = self._call_api(prompt)
+        text = self._call_api(prompt, clip_type.value)
 
         return DJScript(
             text=text,
@@ -267,11 +290,14 @@ class DJEngine:
 
         return prompt
 
-    def _call_api(self, prompt: str) -> str:
+    def _call_api(self, prompt: str, clip_type: str = "") -> str:
         if not self.client:
             log.warning("No API key set — using placeholder DJ script")
+            if self._stats:
+                self._stats.record_fallback(self.name)
             return self._fallback_script()
 
+        t0 = time.perf_counter()
         try:
             response = self.client.messages.create(
                 model=self.cfg["api"]["model"],
@@ -279,9 +305,40 @@ class DJEngine:
                 system=self.persona,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return response.content[0].text.strip()
+            latency_ms = (time.perf_counter() - t0) * 1000
+            text = response.content[0].text.strip()
+
+            if self._stats:
+                self._stats.record_api_call(
+                    self.name,
+                    clip_type,
+                    response.usage.input_tokens,
+                    response.usage.output_tokens,
+                    latency_ms,
+                )
+
+            # Restore health on success
+            if not self._api_healthy:
+                log.info(f"DJ {self.name}: Claude API recovered after outage")
+            self._consecutive_failures = 0
+            self._api_healthy = True
+            self._unhealthy_since = None
+            return text
+
         except Exception as e:
-            log.error(f"Claude API error: {e}")
+            log.error(f"Claude API error ({self.name}): {e}")
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= _API_FAILURE_THRESHOLD:
+                if self._api_healthy:
+                    log.warning(
+                        f"DJ {self.name}: API marked unhealthy after "
+                        f"{self._consecutive_failures} consecutive failures"
+                    )
+                self._api_healthy = False
+                if self._unhealthy_since is None:
+                    self._unhealthy_since = time.monotonic()
+            if self._stats:
+                self._stats.record_fallback(self.name)
             return self._fallback_script()
 
     def _fallback_script(self) -> str:

@@ -24,7 +24,9 @@ Routes:
   POST /api/favorites/user/remove   body: {artist, title}  [auth required]
   GET  /api/favorites/dj/{name}     → DJ favorites by slot  [auth required]
   POST /api/favorites/dj/{name}/regenerate  [auth required]
-  GET  /api/track              → full track detail (id3, annotation, history, art)  [auth required]
+  GET  /api/track              → full track detail (id3, annotation, history, art)  [public]
+  GET  /api/dj-stats           → per-DJ API call/token/latency stats  [auth required]
+  POST /api/dj-stats/reset     → clear all accumulated stats  [auth required]
 """
 import base64
 import json
@@ -121,6 +123,22 @@ class _Handler(BaseHTTPRequestHandler):
             data = self._track_detail(artist, title)
             data.pop("file_path", None)   # never expose server path to clients
             self._respond(200, "application/json", json.dumps(data).encode())
+
+        elif self.path == "/api/dj-stats":
+            if not self._require_admin():
+                return
+            if not self.engine:
+                return self._respond(503, "text/plain", b"Engine not available")
+            stats = self.engine._dj_stats.to_dict()
+            # Augment with live health status from each engine
+            for dj_cfg in self.engine._dj_configs:
+                name = dj_cfg["name"]
+                eng  = self.engine._dj_engines.get(name)
+                if eng and name in stats:
+                    stats[name]["api_healthy"] = eng.is_api_healthy
+                elif name not in stats:
+                    stats[name] = {"api_healthy": eng.is_api_healthy if eng else False}
+            self._respond(200, "application/json", json.dumps(stats).encode())
 
         else:
             m = re.match(r'^/api/favorites/dj/([^/]+)$', self.path)
@@ -230,6 +248,12 @@ class _Handler(BaseHTTPRequestHandler):
             except (ValueError, KeyError, TypeError):
                 return self._respond(400, "text/plain", b"Invalid JSON - need artist, title")
             self.engine._programmer.remove_user_favorite(artist, title)
+            self._respond(200, "application/json", b'{"ok":true}')
+
+        elif self.path == "/api/dj-stats/reset":
+            if not self.engine:
+                return self._respond(503, "text/plain", b"Engine not available")
+            self.engine._dj_stats.reset()
             self._respond(200, "application/json", b'{"ok":true}')
 
         else:
