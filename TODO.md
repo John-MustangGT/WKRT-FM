@@ -82,9 +82,49 @@ Add to `requirements.txt`.
 - Show last N Discord requests in a "Request Queue" card (store in-memory list on engine)
 - Button to clear pending requests
 
+### Why Discord is the right layer for this
+
+Discord does the hard auth/moderation work for free so we don't have to:
+
+- **Auth** — Discord accounts = identity. No login system to build. Restrict
+  the request channel to server members only (or a specific role like `@listener`).
+- **Spam** — Enable **Slowmode** on the request channel (e.g. 60s per user).
+  Discord enforces it server-side before the bot ever sees the message.
+- **Content / PG filter** — Enable **AutoMod** on the server: built-in NSFW
+  keyword filter + custom blocked words list. Messages that trip it are deleted
+  before the bot processes them. Free, no API calls, no maintenance.
+- **Banning** — Server mods can kick/ban abusers without touching the station.
+
+### API credit protection
+
+`!request` never touches Claude — it's just track lookup + queue. Safe.
+
+`!dedicate` injects into `live_context` as one-shot, which fires on the next
+**natural** DJ break (one that would have happened anyway). The risk is
+`force_dj_break()` — if called on every dedication it could generate extra
+Claude calls beyond the normal cadence.
+
+**Rules to enforce in the bot:**
+
+1. **One pending dedication at a time.** If one is already queued, reply
+   "There's already a dedication in the booth — try again after the next break."
+   Don't call `force_dj_break()` again.
+2. **One pending request at a time.** Same deal — `force_next_track` replaces
+   whatever was queued, so stacking them is pointless anyway.
+3. **Per-user cooldown (bot-side, secondary net):** 5 min between commands per
+   Discord user ID, regardless of Discord slowmode setting. Store in a simple
+   `dict[user_id, last_timestamp]`.
+4. **Never call `force_dj_break()` for a bare `!request`** — let it play at
+   the next natural break. Only use it for dedications where timing matters.
+
+With Slowmode=60s + one-pending-at-a-time, the absolute max extra Claude calls
+from Discord is one per ~60 seconds, bounded by however fast the DJ breaks
+already fire. In practice it's a non-issue.
+
 ### Edge cases to handle
 
-- Rate limiting: ignore rapid-fire requests from the same user (30s cooldown per user)
+- Rate limiting: per-user 5 min cooldown (dict lookup, no DB needed)
 - Unknown track: reply "Couldn't find that one in the crate — try `!request Artist - Title`"
 - No engine yet (still warming): reply "We're just spinning up, try again in a minute"
 - Duplicate request already queued: reply "Already in the stack!"
+- AutoMod-deleted message: Discord handles it silently, bot never sees it
