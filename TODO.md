@@ -2,6 +2,59 @@
 
 ---
 
+## DJ Shift Handoffs
+
+Natural on-air handoff when the active DJ changes — outgoing signs off and
+introduces the incoming, incoming responds to what was just said.
+
+### Two prompts, sequential (outgoing text feeds incoming)
+
+**Prompt 1 — outgoing DJ** (uses their persona + voice):
+```
+You're wrapping up your shift and handing the console over to {incoming_name}
+for the {time_slot} show. Give a warm sign-off, mention something about what
+you just played, and set up {incoming_name} — make it feel like a real FM handoff.
+```
+
+Capture `handoff_text`. Synthesize with outgoing DJ's TTS voice. Play clip.
+
+**Prompt 2 — incoming DJ** (uses their persona + voice):
+```
+You're starting your {time_slot} show on WKRT 104.7. {outgoing_name} just
+handed the console over to you and said: "{handoff_text}". Pick it up from
+there — acknowledge the intro, make it yours, and kick off your set.
+```
+
+Synthesize with incoming DJ's TTS voice. Play clip. Normal show resumes.
+
+### Where to hook in
+
+`_maybe_announce_dj_change()` in `engine.py` already detects the flip.
+Currently it just logs + updates ICY metadata. Extend it to:
+
+1. Set `self._pending_handoff = (outgoing_cfg, incoming_cfg)`
+2. In the main loop, after finishing the current track and before
+   `_build_segment()` runs for the next one, check `_pending_handoff`
+   and call `_do_handoff()` which generates + plays both clips sequentially
+
+### New `ClipType` entries (in `dj.py`)
+
+```python
+ClipType.HANDOFF_OUT   # outgoing sign-off
+ClipType.HANDOFF_IN    # incoming pickup
+```
+
+Or handle entirely in `engine.py` as one-off logic — simpler since it only
+ever fires at shift boundaries.
+
+### Edge cases
+
+- DJ override active: suppress handoff (no natural shift change)
+- Same DJ back-to-back (e.g. only one DJ configured): skip
+- TTS failure: fall back to a generic station ID clip, don't block the show
+
+---
+
 ## GPT-4o "Themed Hour" DJ
 
 A third DJ personality powered by OpenAI instead of Claude — does curated
@@ -106,6 +159,114 @@ Strong pop-culture pattern matching baked into training — ask for "Miami Vice
 influence" and it knows Jan Hammer, Phil Collins, Glenn Frey without being told.
 Claude would too, but different training data = different flavor = more variety
 across the three DJs.
+
+---
+
+## Discord Listener Theme Voting
+
+Before the GPT DJ's shift starts, post a poll to Discord so listeners pick
+the themed hour.
+
+### Flow
+
+- ~10 min before Chase's shift: bot posts to #requests channel
+  "🎙️ Chase goes on in 10 — vote for the theme!" with 3-4 options
+- Use Discord's native poll API (added 2024) or emoji reaction voting
+  (reactions are simpler, wider client support)
+- At shift start, tally votes, pass winning theme to GPT as a seed
+  ("Listeners voted for: Hair Metal Happy Hour — execute it")
+- If no votes cast: GPT picks freely as normal
+
+### Write-in themes
+
+Allow `!theme [idea]` command in the channel during the voting window.
+Collect write-ins, let GPT judge if it's executable against the library
+("Can I do a 'Yacht Rock' hour? Let me check the crate…"), then add it
+to the poll or auto-accept if it's the only suggestion.
+
+### Config
+
+```toml
+[discord]
+theme_voting_minutes_before = 10   # how early to post the poll
+theme_options_count = 4            # how many GPT-generated options to offer
+```
+
+---
+
+## Station History Context
+
+Inject "what was happening in {year}" into DJ prompts so breaks feel grounded
+in the era of the song, not just the song itself.
+
+### Approach
+
+Let the AI generate it from training knowledge — no external API needed.
+Add a `year_context` field to the DJ prompt when a song has a year tag:
+
+```
+Song context: "{title}" by {artist} came out in {year}.
+In {year}: [AI-generated 1-2 sentence snapshot of what was happening —
+pop culture, news, sports, TV — that a radio DJ would naturally reference]
+```
+
+Could be pre-generated and cached per year at startup (one Claude call per
+year in the library = ~10-15 calls, cheap, stored in `config/year_context.json`).
+Then injected into `between_tracks` and `trivia` prompts automatically.
+
+### What good looks like
+
+> "That was Bonnie Tyler in '83 — the same year Return of the Jedi hit theaters
+> and everyone had a Rubik's Cube they still couldn't solve. Some things age
+> better than others."
+
+---
+
+## Song Annotation (richer DJ facts)
+
+Pre-fetch real metadata per track so DJs have accurate facts, not hallucinated ones.
+
+### Data sources (all free)
+
+| Source | What it gives | API |
+|---|---|---|
+| MusicBrainz | recording date, album, genre tags, MBID | REST, no key needed |
+| Last.fm | listener count, tags, wiki summary | free API key |
+| Discogs | label, catalog #, pressing info | free API key |
+
+### Storage
+
+Sidecar JSON: `config/annotations/{artist_norm}_{title_norm}.json`
+
+```json
+{
+  "album": "Pyromania",
+  "recorded": "1982",
+  "label": "Mercury Records",
+  "tags": ["hard rock", "glam metal", "arena rock"],
+  "wiki_summary": "First single from Pyromania, reached #12 on Billboard Hot 100...",
+  "fetched_at": "2026-04-26T10:00:00Z"
+}
+```
+
+### Injection
+
+Add annotation to the `between_tracks` and `trivia` prompts when available:
+
+```
+Known facts about this track (use these — don't invent others):
+{annotation}
+```
+
+The "don't invent others" instruction reduces hallucination on specific claims
+(chart positions, recording locations, etc.) while still letting the DJ be
+conversational around verified facts.
+
+### Fetch strategy
+
+- Lazy: fetch on first play, cache forever (annotations don't change)
+- Background thread: annotate the whole library once at startup if cache is cold
+- Rate limit: MusicBrainz asks for 1 req/sec, Last.fm is generous
 
 ---
 
