@@ -12,6 +12,7 @@ Workflow:
   4. Pre-generate next segment while current plays
 """
 import base64
+import datetime
 import json
 import logging
 import shutil
@@ -108,6 +109,7 @@ class WKRTEngine:
         self._programmed_block: list[Track] = []
         self._block_lock = threading.Lock()
         self._refilling  = threading.Event()
+        self._regen_triggered_for: Optional[str] = None
 
         self._listener_count = 0
         self._connect_id_pending = threading.Event()
@@ -158,6 +160,11 @@ class WKRTEngine:
 
         # Start context fetcher (weather + sports)
         self.context.start()
+
+        # Watch for delayed DJ re-pick after crate updates
+        threading.Thread(
+            target=self._regen_watcher, daemon=True, name="regen-watcher"
+        ).start()
 
         # Generate DJ favorites + first programmed block in background
         threading.Thread(
@@ -568,8 +575,36 @@ class WKRTEngine:
             log.info(f"Regenerating favorites for {dj_name}…")
             data = self._programmer.generate_all_slots(dj_cfg, self._library)
             self._programmer.save_dj_favorites(dj_name, data)
+            self._programmer.record_regen()
             log.info(f"Favorites regenerated for {dj_name}")
         threading.Thread(target=_worker, daemon=True, name=f"regen-{dj_name}").start()
+
+    def _regen_watcher(self):
+        """Wait 35 min after a crate update, then trigger DJ favorites regeneration."""
+        DELAY = 35 * 60
+        while not self._stop.wait(120):
+            try:
+                state = self._programmer.load_library_state()
+                last_ingest_str = state.get("last_ingest")
+                if not last_ingest_str:
+                    continue
+                if self._regen_triggered_for == last_ingest_str:
+                    continue
+                last_ingest = datetime.datetime.fromisoformat(last_ingest_str)
+                now = datetime.datetime.now(datetime.timezone.utc)
+                if (now - last_ingest).total_seconds() < DELAY:
+                    continue
+                last_regen_str = state.get("last_regen")
+                if last_regen_str:
+                    last_regen = datetime.datetime.fromisoformat(last_regen_str)
+                    if last_regen >= last_ingest:
+                        continue
+                self._regen_triggered_for = last_ingest_str
+                log.info("Regen watcher: 35 min since crate update — refreshing DJ favorites")
+                for dj_cfg in self._dj_configs:
+                    self.regenerate_dj_favorites(dj_cfg["name"])
+            except Exception as e:
+                log.error(f"Regen watcher error: {e}")
 
     # ── DJ rotation ───────────────────────────────────────────────────────────
 
@@ -665,8 +700,7 @@ class WKRTEngine:
             added.append(track)
 
         if added:
-            for dj_cfg in self._dj_configs:
-                self.regenerate_dj_favorites(dj_cfg["name"])
+            self._programmer.record_ingest()
 
         return added
 

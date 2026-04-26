@@ -6,6 +6,7 @@ Routes:
   GET  /admin         → admin.html (DJ/queue control)  [auth required]
   GET  /api/status    → JSON station state
   GET  /api/library   → JSON artist/track library
+  GET  /api/library/state      → {last_ingest, last_regen} timestamps  [auth required]
   POST /api/dj/override        body: {"name": "Neon"}  [auth required]
   DELETE /api/dj/override      [auth required]
   POST /api/dj/restart         [auth required]
@@ -87,6 +88,11 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 data = "[]"
             self._respond(200, "application/json", data.encode())
+        elif self.path == "/api/library/state":
+            if not self._require_admin():
+                return
+            state = self.engine._programmer.load_library_state() if self.engine else {}
+            self._respond(200, "application/json", json.dumps(state).encode())
         elif self.path == "/api/listeners":
             if not self._require_admin():
                 return

@@ -136,6 +136,36 @@ class DJProgrammer:
                 if (_norm(f["artist"]), _norm(f["title"])) != key]
         self.save_user_favorites(favs)
 
+    # ── Library state metadata ────────────────────────────────────────────────
+
+    def library_state_path(self) -> Path:
+        return self.config_dir / "library_state.json"
+
+    def load_library_state(self) -> dict:
+        path = self.library_state_path()
+        if path.exists():
+            try:
+                return json.loads(path.read_text())
+            except Exception:
+                pass
+        return {}
+
+    def save_library_state(self, state: dict):
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.library_state_path().write_text(json.dumps(state, indent=2))
+
+    def record_ingest(self):
+        state = self.load_library_state()
+        state["last_ingest"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.save_library_state(state)
+        log.info("Library state: last_ingest updated")
+
+    def record_regen(self):
+        state = self.load_library_state()
+        state["last_regen"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        self.save_library_state(state)
+        log.info("Library state: last_regen updated")
+
     # ── Library summary ───────────────────────────────────────────────────────
 
     def _library_summary(self, library: dict) -> str:

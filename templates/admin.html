@@ -375,21 +375,26 @@
       </div>
     </div>
 
-    <!-- User Favorites -->
+    <!-- MD Picks (user favorites) -->
     <div class="card">
-      <div class="card-label">Your Favorites</div>
+      <div class="card-label">MD Picks</div>
       <p style="font-size:.8rem;color:var(--dim);margin-bottom:10px;line-height:1.5">
-        Up to 20 tracks always included in the DJ's programming pool. Star a song in the queue browser to add it.
+        The Music Director's personal cuts — up to 20 tracks locked into the rotation pool. Hit the star in the library browser to add a song to the stack.
       </p>
       <div id="user-fav-panel"><div class="no-favs">Loading…</div></div>
     </div>
 
     <!-- DJ Favorites -->
     <div class="card">
-      <div class="card-label">DJ Favorites</div>
+      <div class="card-label">DJ Crate Picks</div>
       <p style="font-size:.8rem;color:var(--dim);margin-bottom:10px;line-height:1.5">
-        Each DJ's curated picks by slot. Regenerate after adding new music.
+        Each DJ's curated picks by daypart. Auto-refreshes ~35 min after a crate drop — or hit Regenerate to force it now.
       </p>
+      <div id="library-state-bar" style="font-size:.73rem;color:var(--dim);margin-bottom:10px;padding:6px 10px;background:#111;border-radius:5px;display:none">
+        Crate last updated: <span id="ls-ingest" style="color:var(--text)">—</span>
+        &nbsp;·&nbsp; Picks last refreshed: <span id="ls-regen" style="color:var(--text)">—</span>
+        <span id="ls-stale" style="color:var(--accent2);margin-left:8px;display:none">⚠ picks may be stale</span>
+      </div>
       <div id="dj-fav-panel"><div class="no-favs">Loading…</div></div>
     </div>
 
@@ -725,12 +730,40 @@
     } catch(e) { toast('Error: ' + e.message, 'err'); }
   }
 
+  // ── Library state ─────────────────────────────────────────────────────────
+  function _timeAgo(isoStr) {
+    if (!isoStr) return '—';
+    const secs = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+    if (secs < 60)   return 'just now';
+    if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+    if (secs < 86400) {
+      const h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60);
+      return m ? `${h}h ${m}m ago` : `${h}h ago`;
+    }
+    return Math.floor(secs / 86400) + 'd ago';
+  }
+
+  async function loadLibraryState() {
+    try {
+      const s = await fetch('/api/library/state').then(r => r.json());
+      const bar = document.getElementById('library-state-bar');
+      if (s.last_ingest || s.last_regen) {
+        bar.style.display = 'block';
+        document.getElementById('ls-ingest').textContent = _timeAgo(s.last_ingest);
+        document.getElementById('ls-regen').textContent  = _timeAgo(s.last_regen);
+        const stale = s.last_ingest && (!s.last_regen || new Date(s.last_regen) < new Date(s.last_ingest));
+        document.getElementById('ls-stale').style.display = stale ? 'inline' : 'none';
+      }
+    } catch(e) {}
+  }
+
   // ── DJ favorites ──────────────────────────────────────────────────────────
   const DJ_SLOTS = ['favorites','morning','midday','afternoon','evening','night'];
   let djFavData  = {};      // { DJName: { slot: [...] } }
   let activeSlot = {};      // { DJName: slotName }
 
   async function loadDJFavorites() {
+    loadLibraryState();
     const djs = statusData.dj_names || [];
     if (!djs.length) return;
     const panel = document.getElementById('dj-fav-panel');
@@ -931,6 +964,7 @@
   setInterval(refreshTargets, 8000);
   loadLibrary();
   loadUserFavorites();
+  setInterval(loadLibraryState, 30000);
   // Load DJ favorites once status (which has dj_names) is available
   setTimeout(async () => { await refreshStatus(); loadDJFavorites(); }, 500);
 </script>
