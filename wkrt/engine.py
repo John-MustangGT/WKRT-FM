@@ -421,11 +421,15 @@ class WKRTEngine:
         else:
             audio_args = ["-c:a", "copy", "-f", "mp3"]
 
+        ice_name = target.get(
+            "ice_name",
+            f"{station['call_sign']}-FM {station['frequency']}",
+        )
         cmd = [
             "ffmpeg", "-loglevel", "warning",
             "-re", "-f", "mp3", "-i", "pipe:0",
             *audio_args,
-            "-ice_name", f"{station['call_sign']}-FM {station['frequency']}",
+            "-ice_name", ice_name,
             "-ice_description", station.get("tagline", ""),
             "-ice_genre", "Classic Rock",
             url,
