@@ -27,6 +27,8 @@ class ClipType(Enum):
     TOP_OF_HOUR = "top_of_hour"
     CONNECT_ID = "connect_id"
     NEW_ARRIVAL = "new_arrival"
+    HANDOFF_OUT = "handoff_out"
+    HANDOFF_IN  = "handoff_in"
 
 
 @dataclass
@@ -123,6 +125,32 @@ Rules:
 - Do NOT say "stay tuned" or "don't go anywhere"
 - Output ONLY the spoken text
 """,
+
+    ClipType.HANDOFF_OUT: """
+You are wrapping up your shift and handing the booth over to {next_dj} for their {next_slot} show.
+Station: {call_sign} {frequency} FM
+
+Rules:
+- Sign off warmly — you've had a great run, now it's time to pass the mic
+- Mention {next_dj} by name and hype up their show a little
+- Keep it genuine, like two real radio personalities who know each other
+- 3-5 sentences max — you're walking out the door, not giving a speech
+- Output ONLY the spoken text
+""",
+
+    ClipType.HANDOFF_IN: """
+You are starting your {next_slot} show. {prev_dj} just handed the booth to you and said:
+"{handoff_text}"
+
+Station: {call_sign} {frequency} FM
+
+Rules:
+- Pick up naturally from what {prev_dj} said — acknowledge them, maybe riff on it briefly
+- Introduce yourself and your show with energy appropriate for {next_slot}
+- Tease that great music is coming
+- 3-5 sentences max — hit the ground running, first track is about to drop
+- Output ONLY the spoken text
+""",
 }
 
 def _time_of_day(tz_name: str) -> str:
@@ -144,6 +172,7 @@ def _select_clip_type(weights: dict) -> ClipType:
 
 _API_FAILURE_THRESHOLD = 3       # consecutive failures before marking unhealthy
 _API_RETRY_INTERVAL   = 300.0   # seconds before retrying after going unhealthy
+
 
 
 class DJEngine:
@@ -204,6 +233,35 @@ class DJEngine:
             prev_track=prev_track,
             next_track=next_track,
         )
+
+    def generate_handoff(
+        self,
+        next_engine: "DJEngine",
+        next_slot: str,
+    ) -> tuple[str, str]:
+        """Generate outgoing handoff text, then feed it to the incoming DJ's engine.
+        Returns (outgoing_text, incoming_text)."""
+        cs   = self.station.get("call_sign", "WKRT")
+        freq = self.station.get("frequency", "104.7")
+
+        out_prompt = _PROMPTS[ClipType.HANDOFF_OUT].format(
+            next_dj=next_engine.name,
+            next_slot=next_slot,
+            call_sign=cs,
+            frequency=freq,
+        )
+        outgoing_text = self._call_api(out_prompt, ClipType.HANDOFF_OUT.value)
+
+        in_prompt = _PROMPTS[ClipType.HANDOFF_IN].format(
+            prev_dj=self.name,
+            next_slot=next_slot,
+            handoff_text=outgoing_text,
+            call_sign=cs,
+            frequency=freq,
+        )
+        incoming_text = next_engine._call_api(in_prompt, ClipType.HANDOFF_IN.value)
+
+        return outgoing_text, incoming_text
 
     def _build_prompt(
         self,

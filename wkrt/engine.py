@@ -810,9 +810,11 @@ class WKRTEngine:
         return self._dj_engines[self.active_dj_cfg()["name"]]
 
     def _maybe_announce_dj_change(self, dj_cfg: dict):
-        """Update ICY metadata and state when the on-air DJ changes."""
+        """Detect a DJ shift change, generate handoff clips, and queue them for playback."""
         if dj_cfg["name"] == self._current_dj_name:
             return
+
+        prev_name = self._current_dj_name
         self._current_dj_name = dj_cfg["name"]
         self.state.set_active_dj(dj_cfg["name"])
         station = self.cfg["station"]
@@ -820,6 +822,49 @@ class WKRTEngine:
             f"{dj_cfg['name']} — {station['call_sign']}-FM {station['frequency']}"
         )
         log.info(f"DJ shift → {dj_cfg['name']}")
+
+        # First DJ at startup has no predecessor — skip handoff
+        if not prev_name:
+            return
+
+        prev_engine = self._dj_engines.get(prev_name)
+        next_engine = self._dj_engines.get(dj_cfg["name"])
+        if not prev_engine or not next_engine:
+            return
+
+        tz       = self.cfg["station"].get("timezone", "UTC")
+        next_slot = current_time_slot(tz)
+
+        threading.Thread(
+            target=self._run_handoff,
+            args=(prev_engine, next_engine, dj_cfg, next_slot),
+            daemon=True,
+            name=f"handoff-{prev_name}-{dj_cfg['name']}",
+        ).start()
+
+    def _run_handoff(self, prev_engine, next_engine, next_dj_cfg: dict, next_slot: str):
+        """Generate and play outgoing + incoming handoff clips."""
+        try:
+            log.info(
+                f"Generating handoff: {prev_engine.name} → {next_engine.name} ({next_slot})"
+            )
+            out_text, in_text = prev_engine.generate_handoff(next_engine, next_slot)
+
+            out_clip = self.tts.synthesize(out_text, self._cfg_for(prev_engine.name))
+            in_clip  = self.tts.synthesize(in_text,  next_dj_cfg)
+
+            self._play_clip(out_clip)
+            self._play_clip(in_clip)
+            log.info(f"Handoff complete: {prev_engine.name} → {next_engine.name}")
+        except Exception as e:
+            log.error(f"Handoff generation failed: {e}")
+
+    def _cfg_for(self, dj_name: str) -> dict:
+        """Return dj_cfg dict for the given DJ name."""
+        for dj_cfg in self._dj_configs:
+            if dj_cfg["name"] == dj_name:
+                return dj_cfg
+        return self._dj_configs[0]
 
     # ── ICY metadata ──────────────────────────────────────────────────────────
 

@@ -132,6 +132,17 @@ Cache key is SHA-256 of `"<voice_id>:<text>"` — two DJs saying the same line p
 - `top_of_hour` — pre-generated at :55 for the :00 slot (via `TopOfHourScheduler`)
 - `connect_id` — generated at startup, played when first listener connects (Icecast integration)
 - `new_arrival` — announces a freshly ingested track; triggered automatically when a crate track is next
+- `handoff_out` — outgoing DJ signs off and introduces the incoming DJ by name and slot
+- `handoff_in` — incoming DJ picks up from what the outgoing DJ said (fed the actual handoff text)
+
+### DJ shift handoffs
+
+When `active_dj_cfg()` detects the on-air DJ has changed, `_maybe_announce_dj_change()` spawns a background thread that runs a two-prompt sequential handoff:
+
+1. **Outgoing DJ** (`handoff_out`) — signs off and introduces the incoming DJ by name and time slot
+2. **Incoming DJ** (`handoff_in`) — receives the outgoing DJ's actual spoken text and picks up from it naturally
+
+Both clips are TTS-synthesized and played back-to-back at the shift boundary, using each DJ's own voice/backend. The first DJ at startup (no predecessor) skips the handoff.
 
 ### API health and automatic fallback mode
 
