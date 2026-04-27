@@ -592,7 +592,7 @@ class WKRTEngine:
             live    = self.state.live_context
             if live:
                 ctx["live_context"] = live
-            recent  = list(self.state.recent_tracks[:8])
+            recent  = list(self.state.recent_tracks[:10])
             user_favs = self._programmer.load_user_favorites()
             block   = self._programmer.program_block(
                 dj_cfg, self._library, slot, ctx, recent, user_favs

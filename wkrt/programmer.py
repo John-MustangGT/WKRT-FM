@@ -229,18 +229,26 @@ class DJProgrammer:
         library:        dict,
         time_slot:      str,
         user_favorites: list,
+        recent:         list | None = None,
     ) -> list[Track]:
-        """DJ favorites + time-slot picks + user favorites + random fill."""
+        """DJ favorites + time-slot picks + user favorites + random fill.
+        Tracks in `recent` are hard-excluded so Claude cannot re-pick them."""
         dj_favs = self.load_dj_favorites(dj_cfg["name"])
         seen:  set[str]    = set()
         pool: list[Track]  = []
+
+        # Build a set of recently played keys to exclude from the pool entirely
+        recent_keys: set[str] = {
+            f"{_norm(r.get('artist',''))}:{_norm(r.get('title',''))}"
+            for r in (recent or [])
+        }
 
         def _add(raw: list):
             for item in raw:
                 t = fuzzy_match(item.get("artist", ""), item.get("title", ""), library)
                 if t:
                     key = f"{_norm(t.artist)}:{_norm(t.title)}"
-                    if key not in seen:
+                    if key not in seen and key not in recent_keys:
                         seen.add(key)
                         pool.append(t)
 
@@ -251,7 +259,8 @@ class DJProgrammer:
         # Random fill from the rest of the library
         all_tracks = [t for ts in library.values() for t in ts]
         remaining  = [t for t in all_tracks
-                      if f"{_norm(t.artist)}:{_norm(t.title)}" not in seen]
+                      if f"{_norm(t.artist)}:{_norm(t.title)}" not in seen
+                      and f"{_norm(t.artist)}:{_norm(t.title)}" not in recent_keys]
         random.shuffle(remaining)
         pool.extend(remaining[:self.RANDOM_FILL])
 
@@ -269,7 +278,7 @@ class DJProgrammer:
         user_favorites: list,
     ) -> list[Track]:
         """Ask Claude to program the next BLOCK_SIZE tracks from the candidate pool."""
-        pool = self.build_candidate_pool(dj_cfg, library, time_slot, user_favorites)
+        pool = self.build_candidate_pool(dj_cfg, library, time_slot, user_favorites, recent)
         if not pool:
             pool = [t for ts in library.values() for t in ts]
 
