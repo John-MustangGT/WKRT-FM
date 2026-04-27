@@ -415,7 +415,15 @@ class WKRTEngine:
         bitrate = target.get("bitrate")
 
         if codec == "opus":
-            audio_args = ["-c:a", "libopus", "-b:a", f"{bitrate or 96}k", "-f", "ogg"]
+            audio_args = [
+                "-c:a", "libopus", "-b:a", f"{bitrate or 96}k",
+                "-f", "ogg", "-content_type", "audio/ogg",
+            ]
+        elif codec == "aac":
+            audio_args = [
+                "-c:a", "aac", "-b:a", f"{bitrate or 96}k",
+                "-f", "adts", "-content_type", "audio/aac",
+            ]
         elif bitrate:
             audio_args = ["-c:a", "libmp3lame", "-b:a", f"{bitrate}k", "-f", "mp3"]
         else:
