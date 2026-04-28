@@ -126,6 +126,22 @@ class _Handler(BaseHTTPRequestHandler):
             statuses = self.engine.target_statuses() if self.engine else []
             self._respond(200, "application/json", json.dumps(statuses).encode())
 
+        elif self.path == "/api/streams":
+            # Public — returns enabled stream targets with their listen URLs
+            streams = []
+            if self.engine:
+                for t in self.engine.target_statuses():
+                    if t["enabled"]:
+                        streams.append({
+                            "name":   t["name"],
+                            "host":   t["host"],
+                            "port":   t["port"],
+                            "mount":  t["mount"],
+                            "codec":  t["codec"],
+                            "url":    f"http://{t['host']}:{t['port']}{t['mount']}",
+                        })
+            self._respond(200, "application/json", json.dumps(streams).encode())
+
         elif self.path == "/api/favorites/user":
             if not self._require_admin():
                 return

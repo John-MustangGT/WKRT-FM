@@ -275,6 +275,59 @@
   .track-link:hover { color: var(--accent2); }
   .no-hist { color: var(--dim); font-style: italic; font-size: 0.82rem; }
 
+  /* ── Tune In ── */
+  .tune-in-list { list-style: none; }
+  .tune-in-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .tune-in-item:last-child { border-bottom: none; }
+  .tune-in-name {
+    font-weight: 600;
+    min-width: 80px;
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .tune-in-url {
+    flex: 1;
+    color: #4a9eff;
+    font-size: 0.78rem;
+    word-break: break-all;
+    font-family: monospace;
+    min-width: 0;
+  }
+  .tune-in-codec {
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .codec-mp3  { background: #1a1200; color: #f48c06; border: 1px solid #f48c0630; }
+  .codec-opus { background: #001a0d; color: #4caf50; border: 1px solid #4caf5030; }
+  .codec-aac  { background: #00101a; color: #4a9eff; border: 1px solid #4a9eff30; }
+  .copy-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 0.68rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    letter-spacing: 0.5px;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { border-color: var(--green); color: var(--green); }
+
   /* ── Footer status ── */
   .status-bar {
     display: flex;
@@ -347,6 +400,14 @@
       </ul>
     </div>
 
+  </div>
+
+  <!-- Tune In -->
+  <div class="card" style="margin-top:14px">
+    <div class="card-label">Tune In</div>
+    <ul class="tune-in-list" id="tune-in-list">
+      <li style="color:var(--dim);font-style:italic;font-size:.82rem">Loading streams…</li>
+    </ul>
   </div>
 
   <div class="status-bar">
@@ -485,6 +546,55 @@
 
   refresh();
   setInterval(refresh, 4000);
+
+  // ── Tune In ───────────────────────────────────────────────────────────────
+  async function loadStreams() {
+    let streams;
+    try {
+      streams = await fetch('/api/streams').then(r => r.json());
+    } catch(e) { return; }
+
+    const el = document.getElementById('tune-in-list');
+    if (!streams.length) {
+      el.innerHTML = '<li style="color:var(--dim);font-style:italic;font-size:.82rem">No active streams configured</li>';
+      return;
+    }
+
+    el.innerHTML = streams.map(s => {
+      // Substitute localhost/127.0.0.1 with the browser host so external
+      // listeners get a URL that works from their machine too.
+      const host = (s.host === 'localhost' || s.host === '127.0.0.1')
+        ? window.location.hostname : s.host;
+      const url = `http://${host}:${s.port}${s.mount}`;
+      const codec = s.codec || 'mp3';
+      const codecClass = codec === 'opus' ? 'codec-opus' : codec === 'aac' ? 'codec-aac' : 'codec-mp3';
+      return `<li class="tune-in-item">
+        <span class="tune-in-name">${esc(s.name)}</span>
+        <a class="tune-in-url" href="${esc(url)}" target="_blank">${esc(url)}</a>
+        <span class="tune-in-codec ${codecClass}">${esc(codec)}</span>
+        <button class="copy-btn" onclick="copyUrl(this,'${esc(url)}')">COPY</button>
+      </li>`;
+    }).join('');
+  }
+
+  function copyUrl(btn, url) {
+    navigator.clipboard.writeText(url).then(() => {
+      btn.textContent = 'COPIED';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'COPY'; btn.classList.remove('copied'); }, 1800);
+    }).catch(() => {
+      // Fallback for non-HTTPS contexts
+      const ta = document.createElement('textarea');
+      ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      btn.textContent = 'COPIED'; btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = 'COPY'; btn.classList.remove('copied'); }, 1800);
+    });
+  }
+
+  loadStreams();
 
   // ── Track detail panel ────────────────────────────────────────────────────
   document.addEventListener('click', e => {
