@@ -813,6 +813,59 @@ class WKRTEngine:
 
         return added
 
+    def get_queue_snapshot(self) -> list[dict]:
+        """Return the projected play queue as a list of dicts.
+
+        Order:
+          0  — currently playing (label "now")
+          1  — next up (pre-loaded, label = projected start time)
+          2+ — programmed block remainder (projected times)
+
+        Each entry:
+          { "type": "track"|"dj", "label": "Now"|"8:37 PM",
+            "artist": str, "title": str, "year": int,
+            "duration": float }
+        """
+        tz_name = self.cfg["station"].get("timezone", "America/New_York")
+        tz = ZoneInfo(tz_name)
+        now = datetime.datetime.now(tz)
+        cursor = now   # running clock pointer
+
+        result: list[dict] = []
+
+        def _track_entry(track, label: str) -> dict:
+            return {
+                "type": "track",
+                "label": label,
+                "artist": track.artist,
+                "title": track.title,
+                "year": track.year,
+                "duration": round(track.duration_seconds, 1),
+            }
+
+        def _fmt(dt: datetime.datetime) -> str:
+            h = dt.hour % 12 or 12
+            return f"{h}:{dt.strftime('%M')} {'AM' if dt.hour < 12 else 'PM'}"
+
+        # Currently playing
+        if self.current_track:
+            result.append(_track_entry(self.current_track, "Now"))
+            cursor += datetime.timedelta(seconds=max(0, self.current_track.duration_seconds))
+
+        # Next pre-generated track
+        if self.next_track:
+            result.append(_track_entry(self.next_track, _fmt(cursor)))
+            cursor += datetime.timedelta(seconds=max(0, self.next_track.duration_seconds))
+
+        # Programmed block remainder
+        with self._block_lock:
+            block = list(self._programmed_block)
+        for track in block:
+            result.append(_track_entry(track, _fmt(cursor)))
+            cursor += datetime.timedelta(seconds=max(0, track.duration_seconds))
+
+        return result
+
     def get_library_for_api(self) -> list:
         """Return library grouped by artist, sorted, suitable for JSON serialisation."""
         artists: dict[str, list] = {}

@@ -25,6 +25,7 @@ Routes:
   GET  /api/favorites/dj/{name}     → DJ favorites by slot  [auth required]
   POST /api/favorites/dj/{name}/regenerate  [auth required]
   GET  /api/track              → full track detail (id3, annotation, history, art)  [public]
+  GET  /api/queue              → projected play queue (now + upcoming)  [auth required]
   GET  /api/dj-stats           → per-DJ API call/token/latency stats  [public]
   POST /api/dj-stats/reset     → clear all accumulated stats  [auth required]
   GET  /metrics                → Prometheus text exposition format  [public]
@@ -125,6 +126,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             statuses = self.engine.target_statuses() if self.engine else []
             self._respond(200, "application/json", json.dumps(statuses).encode())
+
+        elif self.path == "/api/queue":
+            if not self._require_admin():
+                return
+            snapshot = self.engine.get_queue_snapshot() if self.engine else []
+            self._respond(200, "application/json", json.dumps(snapshot).encode())
 
         elif self.path == "/api/streams":
             # Public — returns enabled stream targets with their listen URLs

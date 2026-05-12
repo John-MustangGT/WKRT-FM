@@ -303,6 +303,44 @@
   .tgt-btn-restart { border: 1px solid var(--blue);   background: transparent; color: var(--blue); }
   .tgt-btn-restart:hover { background: var(--blue);   color: #fff; }
 
+  /* ── Up Next queue ── */
+  .queue-timeline {
+    display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
+  }
+  .qt-row {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    align-items: center;
+    gap: 0 12px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 0.84rem;
+    transition: background .1s;
+  }
+  .qt-row:hover { background: #1e1e1e; }
+  .qt-row.qt-now {
+    background: #1a0900;
+    border: 1px solid #e85d0440;
+  }
+  .qt-time {
+    font-size: 0.72rem; font-family: monospace;
+    color: var(--dim); white-space: nowrap; text-align: right;
+  }
+  .qt-now .qt-time { color: var(--accent); font-weight: 700; }
+  .qt-track { min-width: 0; }
+  .qt-title {
+    font-weight: 500; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .qt-artist {
+    font-size: 0.72rem; color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .qt-year {
+    font-size: 0.68rem; color: var(--accent2); margin-left: 5px;
+  }
+  .qt-empty { color: var(--dim); font-style: italic; font-size: 0.82rem; padding: 8px 2px; }
+
   /* ── Toast ── */
   #toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
@@ -470,6 +508,14 @@
         <span id="ls-stale" style="color:var(--accent2);margin-left:8px;display:none">⚠ picks may be stale</span>
       </div>
       <div id="dj-fav-panel"><div class="no-favs">Loading…</div></div>
+    </div>
+
+    <!-- Up Next Queue -->
+    <div class="card card-full">
+      <div class="card-label">Up Next</div>
+      <div id="queue-timeline-panel">
+        <div class="qt-empty">Loading queue…</div>
+      </div>
     </div>
 
     <!-- Live Context Injection -->
@@ -960,6 +1006,33 @@
     }
   }
 
+  // ── Up Next queue ─────────────────────────────────────────────────────────
+  async function refreshQueue() {
+    try {
+      const items = await fetch('/api/queue').then(r => r.json());
+      const panel = document.getElementById('queue-timeline-panel');
+      if (!items.length) {
+        panel.innerHTML = '<div class="qt-empty">Queue is empty</div>';
+        return;
+      }
+      panel.innerHTML = '<div class="queue-timeline">' +
+        items.map((item, i) => {
+          const isNow = item.label === 'Now';
+          return `<div class="qt-row${isNow ? ' qt-now' : ''}">
+            <div class="qt-time">${esc(item.label)}</div>
+            <div class="qt-track">
+              <div class="qt-title">${esc(item.title)}<span class="qt-year">${item.year}</span></div>
+              <div class="qt-artist">${esc(item.artist)}</div>
+            </div>
+          </div>`;
+        }).join('') +
+      '</div>';
+    } catch(e) {
+      document.getElementById('queue-timeline-panel').innerHTML =
+        '<div class="qt-empty">Could not load queue</div>';
+    }
+  }
+
   // ── Live context ──────────────────────────────────────────────────────────
   function _updateContextBadge(d) {
     const badge = document.getElementById('context-active');
@@ -1273,6 +1346,8 @@
   setInterval(refreshListeners, 5000);
   refreshTargets();
   setInterval(refreshTargets, 8000);
+  refreshQueue();
+  setInterval(refreshQueue, 10000);
   loadLibrary();
   loadUserFavorites();
   setInterval(loadLibraryState, 30000);
