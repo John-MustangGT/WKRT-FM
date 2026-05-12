@@ -9,14 +9,20 @@ Each DJ maintains six curated track lists:
   evening     — 7 pm – 10 pm
   night       — 10 pm – 5 am
 
-When programming a block the active DJ's favorites + current time-slot list
-(40 tracks total) are combined with the user's saved favorites (up to 20)
-and a random fill (20) to form a curated pool of ~80 candidates.
-Claude then picks BLOCK_SIZE tracks from that pool.
+When programming a block four sources are merged into a candidate pool:
+  1. DJ selections   — the active DJ's all-time favorites
+  2. Shift selections — the DJ's picks for the current time slot
+  3. MD selections    — music director (user) favorites
+  4. Random fill      — weighted toward underplayed tracks (inverse play count)
+
+The full pool is deduplicated (each track appears exactly once) and all
+tracks played recently are hard-excluded before Claude picks BLOCK_SIZE
+tracks from the result.
 """
 import datetime
 import json
 import logging
+import math
 import random
 import re
 import threading
@@ -230,9 +236,19 @@ class DJProgrammer:
         time_slot:      str,
         user_favorites: list,
         recent:         list | None = None,
+        history=None,
     ) -> list[Track]:
-        """DJ favorites + time-slot picks + user favorites + random fill.
-        Tracks in `recent` are hard-excluded so Claude cannot re-pick them."""
+        """Build the candidate pool from four sources, fully deduplicated.
+
+        Sources (in priority order):
+          1. DJ all-time favorites
+          2. DJ shift/time-slot picks
+          3. Music director (user) favorites
+          4. Random fill weighted toward underplayed tracks
+
+        Tracks in `recent` are hard-excluded from all sources.
+        `history` is an optional PlayHistory instance used to weight fill.
+        """
         dj_favs = self.load_dj_favorites(dj_cfg["name"])
         seen:  set[str]    = set()
         pool: list[Track]  = []
@@ -252,17 +268,46 @@ class DJProgrammer:
                         seen.add(key)
                         pool.append(t)
 
+        # Source 1: DJ all-time favorites
         _add(dj_favs.get("favorites", []))
+        # Source 2: DJ shift / time-slot picks
         _add(dj_favs.get(time_slot, []))
+        # Source 3: Music director (user) favorites
         _add(user_favorites)
 
-        # Random fill from the rest of the library
+        # Source 4: Random fill, weighted toward underplayed tracks
         all_tracks = [t for ts in library.values() for t in ts]
-        remaining  = [t for t in all_tracks
-                      if f"{_norm(t.artist)}:{_norm(t.title)}" not in seen
-                      and f"{_norm(t.artist)}:{_norm(t.title)}" not in recent_keys]
-        random.shuffle(remaining)
-        pool.extend(remaining[:self.RANDOM_FILL])
+        remaining  = [
+            t for t in all_tracks
+            if f"{_norm(t.artist)}:{_norm(t.title)}" not in seen
+            and f"{_norm(t.artist)}:{_norm(t.title)}" not in recent_keys
+        ]
+
+        if remaining:
+            if history:
+                # Weight = 1 / (1 + total_plays) so unplayed tracks score highest
+                weights = [
+                    1.0 / (1 + history.load(t.artist, t.title).get("total_plays", 0))
+                    for t in remaining
+                ]
+            else:
+                weights = [1.0] * len(remaining)
+
+            # Weighted sampling without replacement via exponential keys
+            keyed = sorted(
+                zip(remaining, weights),
+                key=lambda x: -math.log(random.random()) / x[1],
+            )
+            fill_count = 0
+            fill_seen: set[str] = set()
+            for t, _ in keyed:
+                if fill_count >= self.RANDOM_FILL:
+                    break
+                key = f"{_norm(t.artist)}:{_norm(t.title)}"
+                if key not in seen and key not in fill_seen:
+                    fill_seen.add(key)
+                    pool.append(t)
+                    fill_count += 1
 
         return pool
 
@@ -276,9 +321,12 @@ class DJProgrammer:
         context:        Optional[dict],
         recent:         list,          # list of {artist, title} dicts
         user_favorites: list,
+        history=None,
     ) -> list[Track]:
         """Ask Claude to program the next BLOCK_SIZE tracks from the candidate pool."""
-        pool = self.build_candidate_pool(dj_cfg, library, time_slot, user_favorites, recent)
+        pool = self.build_candidate_pool(
+            dj_cfg, library, time_slot, user_favorites, recent, history
+        )
         if not pool:
             pool = [t for ts in library.values() for t in ts]
 

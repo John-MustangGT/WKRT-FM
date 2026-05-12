@@ -121,7 +121,9 @@ class WKRTEngine:
         self._listener_count = 0
         self._connect_id_pending = threading.Event()
 
-        self.state = StationState()
+        self.state = StationState(
+            recent_tracks_limit=self.cfg.get("playlist", {}).get("recent_exclude", 10)
+        )
         self.context = StationContext(self.cfg)
 
         # Top-of-hour scheduler
@@ -592,10 +594,13 @@ class WKRTEngine:
             live    = self.state.live_context
             if live:
                 ctx["live_context"] = live
-            recent  = list(self.state.recent_tracks[:10])
+            recent  = list(self.state.recent_tracks[
+                :self.cfg.get("playlist", {}).get("recent_exclude", 10)
+            ])
             user_favs = self._programmer.load_user_favorites()
             block   = self._programmer.program_block(
-                dj_cfg, self._library, slot, ctx, recent, user_favs
+                dj_cfg, self._library, slot, ctx, recent, user_favs,
+                history=self._history,
             )
             if block:
                 with self._block_lock:
@@ -620,7 +625,8 @@ class WKRTEngine:
             slot      = current_time_slot(tz)
             user_favs = self._programmer.load_user_favorites()
             block     = self._programmer.program_block(
-                dj_cfg, self._library, slot, self.context.get() or {}, [], user_favs
+                dj_cfg, self._library, slot, self.context.get() or {}, [], user_favs,
+                history=self._history,
             )
             if block:
                 with self._block_lock:

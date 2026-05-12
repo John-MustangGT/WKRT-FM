@@ -7,8 +7,9 @@ from typing import Optional
 
 
 class StationState:
-    def __init__(self):
+    def __init__(self, recent_tracks_limit: int = 10):
         self._lock = threading.Lock()
+        self._recent_tracks_limit = recent_tracks_limit
         self.current_track = None
         self.next_track = None
         self.listener_count = 0
@@ -33,7 +34,7 @@ class StationState:
                     "title": self.current_track.title,
                     "year": self.current_track.year,
                 })
-                self.recent_tracks = self.recent_tracks[:10]
+                self.recent_tracks = self.recent_tracks[:self._recent_tracks_limit]
             self.current_track = track
             self.next_track = next_track
 
