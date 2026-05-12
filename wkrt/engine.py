@@ -224,6 +224,11 @@ class WKRTEngine:
             target=self._listener_poll_worker, daemon=True, name="listener-poll"
         ).start()
 
+        # Monitor stream health every 30 s and auto-restart any dead enabled targets
+        threading.Thread(
+            target=self._stream_monitor_worker, daemon=True, name="stream-monitor"
+        ).start()
+
         # Start hook server and warm the cache
         self.hooks.start()
         self.cache.start_warmup()
@@ -526,24 +531,43 @@ class WKRTEngine:
         return any_live
 
     def _reconnect_worker(self, idx: int):
+        """Retry a dead stream target indefinitely (respecting enabled flag and stop event).
+
+        Backoff: 5s, 10s, 15s … capped at 60s between attempts.  The loop
+        sleeps in 1-second ticks so disable_target() / stop() are noticed
+        quickly without waiting for a full sleep interval.
+        """
         target = self._targets[idx]
         name = target.get("name", target.get("host", str(idx)))
-        for attempt in range(12):
-            if self._stop.is_set() or not self._target_enabled[idx]:
+        attempt = 0
+        while not self._stop.is_set():
+            if not self._target_enabled[idx]:
                 break
             wait = min(60, 5 * (attempt + 1))
             log.warning(f"Stream '{name}' down — reconnecting in {wait}s (attempt {attempt + 1})")
-            time.sleep(wait)
-            if not self._target_enabled[idx]:
+            # Sleep 1 s at a time so stop/disable are noticed promptly
+            for _ in range(wait):
+                if self._stop.is_set() or not self._target_enabled[idx]:
+                    break
+                time.sleep(1)
+            if self._stop.is_set() or not self._target_enabled[idx]:
                 break
             proc = self._start_stream(target)
             if proc and proc.poll() is None:
                 self._stream_procs[idx] = proc
-                log.info(f"Stream '{name}' reconnected")
+                log.info(f"Stream '{name}' reconnected after {attempt + 1} attempt(s)")
                 break
-        else:
-            log.error(f"Stream '{name}' could not reconnect after retries")
+            attempt += 1
         self._reconnecting.discard(idx)
+
+    def _stream_monitor_worker(self):
+        """Background thread: check stream health every 30 s and spawn reconnect
+        workers for any dead-but-enabled targets.  This ensures dead streams are
+        noticed even when the main loop is idle (cache warming, no listeners)."""
+        # Give streams a moment to connect before the first health check
+        time.sleep(15)
+        while not self._stop.wait(30):
+            self._ensure_all_streams()
 
     # ── Target runtime controls ───────────────────────────────────────────────
 
