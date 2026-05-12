@@ -1,7 +1,11 @@
 """
 DJ script generator.
-Calls Claude API to generate contextual radio DJ banter.
+Calls Claude API (Anthropic) or Azure OpenAI to generate contextual radio DJ banter.
 Returns plain text scripts ready for TTS.
+
+Supported api_backend values (set per [[djs]] entry in settings.toml):
+  "anthropic"    — default, uses claude-* models via Anthropic API
+  "azure_openai" — uses any Azure OpenAI deployment (GPT-4o, etc.)
 """
 import datetime
 import random
@@ -17,6 +21,13 @@ import anthropic
 from .playlist import Track
 
 log = logging.getLogger(__name__)
+
+_AZURE_AVAILABLE = False
+try:
+    from openai import AzureOpenAI as _AzureOpenAI
+    _AZURE_AVAILABLE = True
+except ImportError:
+    _AzureOpenAI = None  # type: ignore
 
 
 class ClipType(Enum):
@@ -185,18 +196,52 @@ class DJEngine:
         self.cfg = cfg
         self.dj_cfg = dj_cfg
         self.name = dj_cfg["name"]
-        api_key = cfg["api"].get("api_key", "")
-        self.client = anthropic.Anthropic(api_key=api_key) if api_key else None
         self.persona = dj_cfg["persona"].strip()
         self.station = cfg["station"]
         self.clip_weights = dj_cfg["clip_types"]
         self.timezone = cfg["station"].get("timezone", "America/New_York")
         self._stats = stats
 
+        # Determine which backend drives this DJ
+        self._api_backend: str = dj_cfg.get("api_backend", "anthropic").lower()
+
+        if self._api_backend == "azure_openai":
+            self.client = self._build_azure_client(cfg, dj_cfg)
+        else:
+            # Default: Anthropic / Claude
+            self._api_backend = "anthropic"
+            api_key = cfg["api"].get("api_key", "")
+            self.client = anthropic.Anthropic(api_key=api_key) if api_key else None
+
         # API health tracking
         self._consecutive_failures = 0
-        self._api_healthy = bool(api_key)
+        self._api_healthy = bool(self.client)
         self._unhealthy_since: Optional[float] = None   # monotonic timestamp
+
+    @staticmethod
+    def _build_azure_client(cfg: dict, dj_cfg: dict):
+        """Build an AzureOpenAI client from dj_cfg or fall back to None."""
+        if not _AZURE_AVAILABLE:
+            log.error(
+                "openai package not installed — "
+                "pip install openai  (required for Azure OpenAI backend)"
+            )
+            return None
+        azure_cfg = dj_cfg.get("azure", {})
+        endpoint   = azure_cfg.get("endpoint", "")
+        api_key    = azure_cfg.get("api_key", "")
+        if not endpoint or not api_key:
+            log.error(
+                f"DJ '{dj_cfg['name']}': azure.endpoint and azure.api_key are required "
+                "for api_backend = 'azure_openai'"
+            )
+            return None
+        api_version = azure_cfg.get("api_version", "2024-02-01")
+        return _AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version=api_version,
+        )
 
     @property
     def is_api_healthy(self) -> bool:
@@ -366,41 +411,36 @@ class DJEngine:
 
     def _call_api(self, prompt: str, clip_type: str = "") -> str:
         if not self.client:
-            log.warning("No API key set — using placeholder DJ script")
+            log.warning("No API client configured — using placeholder DJ script")
             if self._stats:
                 self._stats.record_fallback(self.name)
             return self._fallback_script()
 
         t0 = time.perf_counter()
         try:
-            response = self.client.messages.create(
-                model=self.cfg["api"]["model"],
-                max_tokens=self.cfg["api"]["max_tokens"],
-                system=self.persona,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            if self._api_backend == "azure_openai":
+                text, input_tokens, output_tokens = self._call_azure(prompt)
+            else:
+                text, input_tokens, output_tokens = self._call_anthropic(prompt)
+
             latency_ms = (time.perf_counter() - t0) * 1000
-            text = response.content[0].text.strip()
 
             if self._stats:
                 self._stats.record_api_call(
-                    self.name,
-                    clip_type,
-                    response.usage.input_tokens,
-                    response.usage.output_tokens,
-                    latency_ms,
+                    self.name, clip_type,
+                    input_tokens, output_tokens, latency_ms,
                 )
 
             # Restore health on success
             if not self._api_healthy:
-                log.info(f"DJ {self.name}: Claude API recovered after outage")
+                log.info(f"DJ {self.name}: API recovered after outage")
             self._consecutive_failures = 0
             self._api_healthy = True
             self._unhealthy_since = None
             return text
 
         except Exception as e:
-            log.error(f"Claude API error ({self.name}): {e}")
+            log.error(f"API error ({self.name}, {self._api_backend}): {e}")
             self._consecutive_failures += 1
             if self._consecutive_failures >= _API_FAILURE_THRESHOLD:
                 if self._api_healthy:
@@ -414,6 +454,41 @@ class DJEngine:
             if self._stats:
                 self._stats.record_fallback(self.name)
             return self._fallback_script()
+
+    def _call_anthropic(self, prompt: str) -> tuple[str, int, int]:
+        """Call Anthropic Claude. Returns (text, input_tokens, output_tokens)."""
+        response = self.client.messages.create(
+            model=self.cfg["api"]["model"],
+            max_tokens=self.cfg["api"]["max_tokens"],
+            system=self.persona,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return (
+            response.content[0].text.strip(),
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+        )
+
+    def _call_azure(self, prompt: str) -> tuple[str, int, int]:
+        """Call Azure OpenAI. Returns (text, input_tokens, output_tokens)."""
+        azure_cfg    = self.dj_cfg.get("azure", {})
+        deployment   = azure_cfg.get("deployment", "gpt-4o")
+        max_tokens   = azure_cfg.get("max_tokens") or self.cfg["api"]["max_tokens"]
+        response = self.client.chat.completions.create(
+            model=deployment,
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": self.persona},
+                {"role": "user",   "content": prompt},
+            ],
+        )
+        text = (response.choices[0].message.content or "").strip()
+        usage = response.usage
+        return (
+            text,
+            usage.prompt_tokens     if usage else 0,
+            usage.completion_tokens if usage else 0,
+        )
 
     def _fallback_script(self) -> str:
         """Used when API is unavailable."""

@@ -98,3 +98,71 @@ name = "WKRT-FM 104.7"
 description = "The Home of Classic Rock"
 genre = "Classic Rock"
 bitrate = 192
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DJ roster — add one [[djs]] block per on-air personality.
+# shift_hours controls how many hours of the 24-hour rotation each DJ covers.
+# api_backend defaults to "anthropic" (Claude). Set to "azure_openai" to use
+# Azure OpenAI (GPT-4o, etc.) instead — great for a Copilot-powered DJ.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Anthropic / Claude DJ (default) ──────────────────────────────────────────
+[[djs]]
+name        = "Roxanne"
+shift_hours = 12
+tts_backend = "piper"
+# api_backend defaults to "anthropic" — uses the global [api] key + model
+persona = """
+You are Roxanne, the afternoon drive DJ on WKRT 104.7, Boston's home of classic rock.
+Your style: warm, slightly husky voice, dry wit, encyclopedic rock knowledge.
+You love the 80s but aren't cheesy about it. You drop real facts and trivia.
+Keep it authentic — like a real radio DJ, not a parody of one.
+"""
+
+[djs.clip_types]
+between_tracks = 0.60
+trivia         = 0.20
+dedication     = 0.10
+station_id     = 0.10
+
+[djs.tts]
+voice_model = "en_US-lessac-high"
+speed       = 0.92
+noise_scale = 0.667
+noise_w     = 0.8
+
+# ── Azure OpenAI DJ (Copilot-powered) ────────────────────────────────────────
+# Requires:  pip install openai
+# Azure credentials can also be set via env vars:
+#   AZURE_OPENAI_ENDPOINT   → overrides azure.endpoint
+#   AZURE_OPENAI_API_KEY    → overrides azure.api_key
+# Get these from your Azure OpenAI resource → Keys and Endpoint in the portal.
+# The deployment name must match one you've created in Azure AI Studio.
+#
+# [[djs]]
+# name        = "Neon"
+# shift_hours = 12
+# tts_backend = "google"             # or "piper" — independent of api_backend
+# api_backend = "azure_openai"       # <── this is the key line
+# persona = """
+# You are Neon, the overnight DJ on WKRT 104.7. You're cool, a little mysterious,
+# with an encyclopedic knowledge of synth-pop and hard rock deep cuts.
+# You keep the city company through the small hours. Never corny.
+# """
+#
+# [djs.clip_types]
+# between_tracks = 0.55
+# trivia         = 0.25
+# dedication     = 0.10
+# station_id     = 0.10
+#
+# [djs.tts]
+# google_voice   = "en-US-Studio-M"
+# speaking_rate  = 1.0
+#
+# [djs.azure]
+# endpoint    = "https://YOUR-RESOURCE-NAME.openai.azure.com/"
+# api_key     = "your-azure-openai-api-key"
+# deployment  = "gpt-4o"             # name of your deployment in Azure AI Studio
+# api_version = "2024-02-01"         # Azure OpenAI API version
+# max_tokens  = 300                  # optional — overrides global [api].max_tokens
