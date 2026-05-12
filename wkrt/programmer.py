@@ -113,7 +113,10 @@ class DJProgrammer:
 
     def save_dj_favorites(self, dj_name: str, data: dict):
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.dj_favorites_path(dj_name).write_text(json.dumps(data, indent=2))
+        # Lock only for the file write so concurrent regen threads for different DJs
+        # don't block each other during their multi-second Claude API calls.
+        with self._regen_lock:
+            self.dj_favorites_path(dj_name).write_text(json.dumps(data, indent=2))
         log.info(f"DJ favorites saved: {dj_name}")
 
     def load_user_favorites(self) -> list:

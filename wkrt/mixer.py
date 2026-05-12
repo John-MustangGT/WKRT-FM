@@ -12,6 +12,7 @@ Or without a DJ clip:
   [current_track_body] → crossfade → [next_track_start]
 """
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -60,6 +61,7 @@ class Mixer:
         Returns (segment_path, dj_starts_at) where dj_starts_at is the number of
         seconds into the segment when Roxanne begins speaking, or None if no DJ clip.
         """
+        self._check_disk_space()
         out_path = self.spool_dir / f"{segment_name}.mp3"
         dj_starts_at: Optional[float] = None
 
@@ -270,3 +272,16 @@ class Mixer:
         for old in segments[:-keep]:
             old.unlink(missing_ok=True)
             log.debug(f"Spool cleanup: removed {old.name}")
+
+    def _check_disk_space(self, min_mb: int = 50) -> None:
+        """Raise RuntimeError if the spool partition has less than min_mb free."""
+        try:
+            stat = os.statvfs(self.spool_dir)
+            free_mb = (stat.f_bavail * stat.f_frsize) // (1024 * 1024)
+            if free_mb < min_mb:
+                raise RuntimeError(
+                    f"Low disk space: {free_mb} MB free on spool partition — "
+                    f"need at least {min_mb} MB. Clear old files to continue."
+                )
+        except OSError as e:
+            log.warning(f"Disk space check failed: {e}")

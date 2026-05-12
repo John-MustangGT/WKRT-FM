@@ -38,9 +38,14 @@ def _mb_get(params: dict) -> dict:
         req = Request(url, headers={"User-Agent": _USER_AGENT, "Accept": "application/json"})
         try:
             with urlopen(req, timeout=10) as resp:
-                return json.loads(resp.read())
-        finally:
+                result = json.loads(resp.read())
+            # Update the rate-limit clock only after a successful request so that
+            # a network error doesn't add an unnecessary extra 1 s delay before retry.
             _last_request = time.monotonic()
+            return result
+        except Exception:
+            _last_request = time.monotonic()
+            raise
 
 
 def _norm_filename(s: str) -> str:

@@ -144,6 +144,9 @@ class WKRTEngine:
         self._next_segment: Optional[tuple[Path, Optional[float], str]] = None
         self._next_segment_ready = threading.Event()
         self._next_segment_lock = threading.Lock()
+        # Lock protecting current_track / next_track so the cache warmup thread
+        # can safely snapshot them without racing the main loop.
+        self._track_lock = threading.Lock()
 
     def run(self):
         self._print_banner()
@@ -282,9 +285,10 @@ class WKRTEngine:
                         target=self.toh.refresh_connect_id, daemon=True
                     ).start()
 
-            # Advance
-            self.current_track = self.next_track
-            self.next_track = future_track
+            # Advance — write under lock so cache warmup thread gets a consistent snapshot
+            with self._track_lock:
+                self.current_track = self.next_track
+                self.next_track = future_track
             seg_index += 1
             self.track_count += 1
 
@@ -302,6 +306,16 @@ class WKRTEngine:
             # Periodic spool cleanup
             if self.track_count % 10 == 0:
                 self.mixer.cleanup_spool(keep=15)
+
+            # Periodic DJ clip cache purge (every 50 tracks)
+            if self.track_count % 50 == 0:
+                _pinned = set(str(v) for v in self._fallback_clips.values())
+                threading.Thread(
+                    target=self.tts.cleanup_clips,
+                    kwargs={"max_age_days": 7, "keep_paths": _pinned},
+                    daemon=True,
+                    name="clip-purge",
+                ).start()
 
     def _pregenerate(self, current: Track, next_t: Track, idx: int):
         tz_name = self.cfg["station"].get("timezone", "America/New_York")
@@ -419,8 +433,14 @@ class WKRTEngine:
         return []
 
     def _target_url(self, target: dict) -> str:
+        password = target.get("source_password", "")
+        if not password:
+            log.warning(
+                f"Stream target '{target.get('name', 'unknown')}' has no "
+                "source_password configured — stream will likely be rejected by Icecast"
+            )
         return (
-            f"icecast://source:{target.get('source_password', 'hackme')}"
+            f"icecast://source:{password}"
             f"@{target.get('host', 'localhost')}:{target.get('port', 8000)}"
             f"{target.get('mount', '/wkrt')}"
         )
@@ -761,9 +781,16 @@ class WKRTEngine:
     def ingest_tracks(self, paths: list) -> list[Track]:
         """Hot-add audio files to the library and crate. Returns successfully added tracks."""
         import re
+        music_dir = Path(self.cfg["paths"]["music_dir"]).resolve()
         added = []
         for raw in paths:
-            path = Path(raw)
+            # Security: reject paths that escape the configured music directory
+            try:
+                path = Path(raw).resolve()
+                path.relative_to(music_dir)
+            except ValueError:
+                log.warning(f"Ingest rejected (path outside music dir): {raw}")
+                continue
             if not path.exists() or path.suffix.lower() not in AUDIO_EXTENSIONS:
                 log.warning(f"Ingest skip (not found or bad extension): {path}")
                 continue
@@ -944,7 +971,15 @@ class WKRTEngine:
     # ── ICY metadata ──────────────────────────────────────────────────────────
 
     def _update_icy_metadata(self, title: str):
-        """Push a StreamTitle update to all targets that have admin creds."""
+        """Fire-and-forget ICY metadata push — never blocks the playback thread."""
+        t = threading.Thread(
+            target=self._send_icy_metadata, args=(title,),
+            daemon=True, name="icy-meta",
+        )
+        t.start()
+
+    def _send_icy_metadata(self, title: str):
+        """Push a StreamTitle update to all targets that have source credentials."""
         for target in self._targets:
             if not target.get("source_password"):
                 continue
@@ -1132,7 +1167,18 @@ class WKRTEngine:
             )
 
     def stop(self):
+        log.info("Engine stopping...")
         self._stop.set()
+        # Stop supporting services that have explicit shutdown methods
+        try:
+            self.context.stop()
+        except Exception:
+            pass
+        try:
+            self.hooks.stop()
+        except Exception:
+            pass
+        # Flush and close all Icecast stream processes
         for i, proc in enumerate(self._stream_procs):
             if proc:
                 try:
@@ -1141,6 +1187,7 @@ class WKRTEngine:
                 except Exception:
                     proc.kill()
                 self._stream_procs[i] = None
+        log.info("Engine stopped")
 
     def pause(self):
         """Called by cache when cooling timeout reached — no listeners."""
@@ -1149,11 +1196,13 @@ class WKRTEngine:
 
     def build_next_segment(self) -> Optional[Path]:
         """Called by cache warmup to pre-generate a segment."""
-        if self.next_track is None:
+        with self._track_lock:
+            current = self.current_track
+            next_t  = self.next_track
+        if next_t is None:
             return None
         idx = self.track_count
-        seg, _, _ = self._build_segment(self.current_track or self.next_track,
-                                         self.next_track, idx)
+        seg, _, _ = self._build_segment(current or next_t, next_t, idx)
         return seg
 
     # ── Display helpers ──────────────────────────────────────────────────────

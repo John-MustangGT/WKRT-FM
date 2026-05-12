@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -186,3 +187,30 @@ class TTSEngine:
         # Fix "in'" or "in " at end of words for more natural "ing" sound
         text = re.sub(r"(\w+)in'(\W|$)", r"\1en\2", text)
         return text.strip()
+
+    def cleanup_clips(self, max_age_days: int = 7, keep_paths: set | None = None) -> int:
+        """Remove cached DJ clips older than max_age_days that are not pinned.
+
+        Args:
+            max_age_days: Files older than this many days are eligible for removal.
+            keep_paths:   Set of absolute path strings that must never be deleted
+                          (e.g. pre-baked fallback clips).
+
+        Returns the number of files removed.
+        """
+        cutoff = time.time() - (max_age_days * 86_400)
+        keep_paths = keep_paths or set()
+        removed = 0
+        for clip in list(self.dj_clips_dir.glob("dj_*.mp3")):
+            if str(clip) in keep_paths:
+                continue
+            try:
+                if clip.stat().st_mtime < cutoff:
+                    clip.unlink()
+                    removed += 1
+                    log.debug(f"DJ clip purged: {clip.name}")
+            except OSError:
+                pass
+        if removed:
+            log.info(f"DJ clip cache: purged {removed} clip(s) older than {max_age_days}d")
+        return removed

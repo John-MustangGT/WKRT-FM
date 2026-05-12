@@ -31,10 +31,12 @@ Routes:
   GET  /metrics                → Prometheus text exposition format  [public]
 """
 import base64
+import collections
 import json
 import logging
 import re
 import threading
+import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -44,6 +46,12 @@ from urllib.request import Request, urlopen
 log = logging.getLogger(__name__)
 
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+
+# ── Per-IP auth rate limiter ──────────────────────────────────────────────────
+_auth_failures: dict = collections.defaultdict(list)   # ip -> [timestamp, ...]
+_auth_lock = threading.Lock()
+_AUTH_WINDOW_SECS = 60    # sliding window length
+_AUTH_MAX_FAILS   = 5     # max failures before 429
 
 
 def _prom_labels(labels: dict | None) -> str:
@@ -95,6 +103,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/metrics":
             body = self._render_metrics().encode()
             self._respond(200, "text/plain; version=0.0.4; charset=utf-8", body)
+            return
+        elif self.path == "/health":
+            self._serve_health()
             return
         elif self.path == "/":
             self._serve_file(_TEMPLATE_DIR / "index.html", "text/html; charset=utf-8")
@@ -195,6 +206,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._require_admin():
             return
+        log.info(f"Admin POST {self.path} [{self.client_address[0]}]")
         body = self._read_body()
 
         if self.path == "/api/dj/override":
@@ -325,6 +337,7 @@ class _Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self._require_admin():
             return
+        log.info(f"Admin DELETE {self.path} [{self.client_address[0]}]")
         if self.path == "/api/dj/override":
             if not self.engine:
                 return self._respond(503, "text/plain", b"Engine not available")
@@ -334,6 +347,29 @@ class _Handler(BaseHTTPRequestHandler):
             self._respond(404, "text/plain", b"Not found")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+    def _serve_health(self):
+        """GET /health — lightweight status check for monitoring / load-balancers."""
+        if not self.engine:
+            body = json.dumps({"ok": False, "error": "Engine not running"}).encode()
+            return self._respond(503, "application/json", body)
+        unhealthy_djs = [
+            n for n, e in self.engine._dj_engines.items() if not e.is_api_healthy
+        ]
+        connected_targets = sum(
+            1 for p in self.engine._stream_procs if p is not None and p.poll() is None
+        )
+        cache_state = self.engine.cache.state.name
+        ok = cache_state in ("WARM", "RUNNING", "COOLING") and not unhealthy_djs
+        status = {
+            "ok": ok,
+            "cache_state": cache_state,
+            "stream_targets_connected": connected_targets,
+            "stream_targets_total": len(self.engine._targets),
+            "api_healthy": not unhealthy_djs,
+            "unhealthy_djs": unhealthy_djs,
+            "tracks_played": self.engine.track_count,
+        }
+        self._respond(200 if ok else 503, "application/json", json.dumps(status).encode())
 
     def _render_metrics(self) -> str:
         """Render all station metrics in Prometheus text exposition format (v0.0.4)."""
