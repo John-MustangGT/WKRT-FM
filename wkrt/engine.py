@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from rich.console import Console
 from rich.panel import Panel
@@ -303,12 +304,26 @@ class WKRTEngine:
                 self.mixer.cleanup_spool(keep=15)
 
     def _pregenerate(self, current: Track, next_t: Track, idx: int):
-        result = self._build_segment(current, next_t, idx)
+        tz_name = self.cfg["station"].get("timezone", "America/New_York")
+        tz = ZoneInfo(tz_name)
+        # The DJ clip in the pre-generated segment speaks after the currently
+        # playing segment finishes AND after `current` plays.  Estimate both
+        # durations so Claude gets the correct projected clock time.
+        now_playing_secs = max(0, getattr(self.current_track, "duration_seconds", 0))
+        current_secs     = max(0, current.duration_seconds)
+        play_at = datetime.datetime.now(tz) + datetime.timedelta(
+            seconds=now_playing_secs + current_secs
+        )
+        result = self._build_segment(current, next_t, idx, play_at=play_at)
         with self._next_segment_lock:
             self._next_segment = result
 
     def _build_segment(
-        self, track: Track, next_track: Optional[Track], idx: int
+        self,
+        track: Track,
+        next_track: Optional[Track],
+        idx: int,
+        play_at: Optional[datetime.datetime] = None,
     ) -> tuple[Path, Optional[float], str]:
         """Build a single playable segment: track + optional DJ clip.
         Returns (segment_path, dj_starts_at, dj_text) where dj_starts_at is seconds
@@ -369,6 +384,7 @@ class WKRTEngine:
                         next_track=next_track,
                         force_type=force_type,
                         context=ctx,
+                        play_at=play_at,
                     )
                     self._print_dj(script.text, dj_cfg["name"])
                     dj_text = script.text

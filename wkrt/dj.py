@@ -44,6 +44,7 @@ _PROMPTS = {
 Generate a short radio DJ break (3-5 sentences max).
 Just played: "{prev_artist}" - "{prev_title}" ({prev_year})
 Coming up next: "{next_artist}" - "{next_title}" ({next_year})
+Current time: {time} — use this exact time if you mention the time on air.
 
 Rules:
 - Mention the song that just played and/or what's coming up
@@ -57,6 +58,7 @@ Rules:
     ClipType.TRIVIA: """
 Generate a short rock trivia DJ drop (2-4 sentences).
 Just played: "{prev_artist}" - "{prev_title}" ({prev_year})
+Current time: {time} — use this exact time if you mention the time on air.
 
 Rules:
 - Share one genuinely interesting fact about this song, album, or artist
@@ -68,6 +70,7 @@ Rules:
     ClipType.DEDICATION: """
 Generate a fake listener dedication break (3-5 sentences).
 Coming up next: "{next_artist}" - "{next_title}" ({next_year})
+Current time: {time} — use this exact time if you mention the time on air.
 
 Rules:
 - Invent a listener name and a simple dedication (birthday, anniversary, long commute, etc.)
@@ -80,7 +83,7 @@ Rules:
     ClipType.TOP_OF_HOUR: """
 Generate a top-of-the-hour station ID (2-4 sentences).
 Station: {call_sign} {frequency} FM, {city}
-Time: {hour} o'clock
+Time: {time} — state this exact time on air.
 
 Rules:
 - State the time and call sign naturally
@@ -93,6 +96,7 @@ Rules:
     ClipType.CONNECT_ID: """
 Generate a station connect greeting (1-2 sentences max).
 Station: {call_sign} {frequency} FM, {city}
+Current time: {time} — use this exact time if you mention the time on air.
 
 Rules:
 - Welcome the listener back to the station
@@ -105,7 +109,7 @@ Rules:
     ClipType.STATION_ID: """
 Generate a short station ID/time break (1-3 sentences).
 Station: {call_sign} {frequency} FM, {city}
-Time of day hint: {time_of_day}
+Current time: {time} — state this exact time if you call out the time on air.
 
 Rules:
 - Give the call sign and frequency naturally
@@ -117,6 +121,7 @@ Rules:
     ClipType.NEW_ARRIVAL: """
 Generate a DJ break announcing a fresh addition to the station's rotation (2-4 sentences).
 Just dropped into the crate: "{next_artist}" - "{next_title}" ({next_year})
+Current time: {time} — use this exact time if you mention the time on air.
 
 Rules:
 - Make it clear this track just landed — "just added to the crate", "fresh drop", "just dug this one out"
@@ -153,8 +158,8 @@ Rules:
 """,
 }
 
-def _time_of_day(tz_name: str) -> str:
-    hour = datetime.datetime.now(ZoneInfo(tz_name)).hour
+def _time_of_day(tz_name: str, at: Optional[datetime.datetime] = None) -> str:
+    hour = (at or datetime.datetime.now(ZoneInfo(tz_name))).hour
     if   5 <= hour < 10: return "morning drive"
     elif hour < 12:      return "mid-morning"
     elif hour < 15:      return "afternoon"
@@ -211,6 +216,7 @@ class DJEngine:
         next_track: Optional[Track] = None,
         force_type: Optional[ClipType] = None,
         context: Optional[dict] = None,
+        play_at: Optional[datetime.datetime] = None,
     ) -> DJScript:
         clip_type = force_type or _select_clip_type(self.clip_weights)
 
@@ -224,7 +230,7 @@ class DJEngine:
         if clip_type == ClipType.NEW_ARRIVAL and not next_track:
             clip_type = ClipType.STATION_ID
 
-        prompt = self._build_prompt(clip_type, prev_track, next_track, context)
+        prompt = self._build_prompt(clip_type, prev_track, next_track, context, play_at=play_at)
         text = self._call_api(prompt, clip_type.value)
 
         return DJScript(
@@ -269,16 +275,26 @@ class DJEngine:
         prev_track: Optional[Track],
         next_track: Optional[Track],
         context: Optional[dict] = None,
+        play_at: Optional[datetime.datetime] = None,
     ) -> str:
         template = _PROMPTS[clip_type]
-        now = datetime.datetime.now(ZoneInfo(self.timezone))
+        tz = ZoneInfo(self.timezone)
+        now = play_at or datetime.datetime.now(tz)
+        # Ensure now is tz-aware and expressed in the station timezone
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=tz)
+        else:
+            now = now.astimezone(tz)
         hour_12 = now.hour % 12 or 12
         ampm = "AM" if now.hour < 12 else "PM"
+        minute = now.strftime("%M")
+        day_name = now.strftime("%A")
         kwargs = {
             "city": self.station.get("city", "Boston"),
             "call_sign": self.station.get("call_sign", "WKRT"),
             "frequency": self.station.get("frequency", "104.7"),
-            "time_of_day": _time_of_day(self.timezone),
+            "time_of_day": _time_of_day(self.timezone, at=now),
+            "time": f"{day_name}, {hour_12}:{minute} {ampm} Eastern",
             "hour": f"{hour_12} {ampm}",
         }
         if prev_track:
