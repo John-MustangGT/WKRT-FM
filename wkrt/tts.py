@@ -4,10 +4,25 @@ Piper TTS wrapper + Google Cloud TTS backend.
 synthesize(text, dj_cfg) dispatches to the right backend based on
 dj_cfg["tts_backend"] ("piper" or "google") and caches the result by
 a hash of (voice_id, text) so two DJs saying the same line stay separate.
+
+Pronunciation hints
+-------------------
+Piper uses espeak-ng for phonemization, so pronunciation can be guided by
+substituting tricky words/names with phonetic spellings before the text
+reaches Piper.  Two layers are applied (in order):
+
+1. Built-in table (_PIPER_PRONOUNCE) — common rock-radio names/terms that
+   espeak-ng mispronounces out of the box.
+2. Per-DJ overrides — set [djs.tts] pronounce = {"word": "spelling"} in
+   settings.toml to extend or override the built-in table for that DJ.
+
+Substitutions are case-insensitive whole-word matches.  To keep the Google
+TTS path clean, substitutions are only applied when backend == "piper".
 """
 import hashlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -16,6 +31,77 @@ from pathlib import Path
 from typing import Optional
 
 log = logging.getLogger(__name__)
+
+# ── Built-in pronunciation table for Piper / espeak-ng ───────────────────────
+# Keys are the words as they appear in DJ scripts (case-insensitive whole-word).
+# Values are phonetic spellings that espeak-ng renders correctly.
+# Extend per-DJ via [djs.tts] pronounce = {"word": "spelling"} in settings.toml.
+_PIPER_PRONOUNCE: dict[str, str] = {
+    # Artists
+    "AC/DC":            "AC DC",
+    "ACDC":             "AC DC",
+    "Def Leppard":      "Def Lepperd",
+    "Leppard":          "Lepperd",
+    "Motley Crue":      "Motley Croo",
+    "Mötley Crüe":     "Motley Croo",
+    "Crüe":            "Croo",
+    "Yngwie":           "Ing-vay",
+    "Yngwie Malmsteen": "Ing-vay Malmsteene",
+    "Malmsteen":        "Malmsteene",
+    "Dio":              "Dee-oh",
+    "Siouxsie":         "Soo-see",
+    "Axl":              "Axel",
+    "Ozzy":             "Ozzy",
+    "Osbourne":         "Oz-born",
+    "Ozzfest":          "Oz-fest",
+    "Aerosmith":        "Air-oh-smith",
+    "Whitesnake":       "White-snake",
+    "Dokken":           "Dock-en",
+    "Ratt":             "Rat",
+    "Styx":             "Sticks",
+    "REO Speedwagon":   "Ree-oh Speed-wagon",
+    "Reo Speedwagon":   "Ree-oh Speed-wagon",
+    "Springsteen":      "Spring-steen",
+    "Mellencamp":       "Mellen-camp",
+    "Seger":            "See-ger",
+    "Fogerty":          "Foe-ger-tee",
+    "Lynyrd Skynyrd":   "Lin-erd Skin-erd",
+    "Lynyrd":           "Lin-erd",
+    "Skynyrd":          "Skin-erd",
+    "Zeppelin":         "Zepp-uh-lin",
+    "Sabbath":          "Sab-uth",
+    "Metallica":        "Meh-tal-ica",
+    "Megadeth":         "Mega-death",
+    "Anthrax":          "Ann-thrax",
+    "Pantera":          "Pan-tare-uh",
+    "Dimebag":          "Dime-bag",
+    "Anselmo":          "An-sell-mo",
+    "Vedder":           "Ved-er",
+    "Cobain":           "Ko-bane",
+    "Grohl":            "Grole",
+    # Abbreviations / station IDs
+    "WKRT":             "W-K-R-T",
+    "FM":               "F-M",
+    "LP":               "el-pee",
+    "EP":               "ee-pee",
+    "104.7":            "one oh four point seven",
+}
+
+
+def _apply_pronounce_table(text: str, extra: dict | None = None) -> str:
+    """Replace words/phrases using the pronunciation table.
+
+    Matches are whole-word, case-insensitive.  Multi-word keys (e.g.
+    'Lynyrd Skynyrd') are matched before their single-word components
+    because keys are sorted longest-first.
+    """
+    table = dict(_PIPER_PRONOUNCE)
+    if extra:
+        table.update(extra)
+    for key in sorted(table, key=len, reverse=True):
+        pattern = re.compile(r'(?<!\w)' + re.escape(key) + r'(?!\w)', re.IGNORECASE)
+        text = pattern.sub(table[key], text)
+    return text
 
 
 class TTSEngine:
@@ -40,10 +126,17 @@ class TTSEngine:
         Synthesize text to MP3 using the backend specified in dj_cfg.
         Returns path to the cached MP3 file.
         """
-        text = self._preprocess_text(text)
         tts_cfg = dj_cfg.get("tts", {})
         backend = dj_cfg.get("tts_backend", "piper")
         voice_id = tts_cfg.get("voice_model") or tts_cfg.get("google_voice", "default")
+
+        text = self._preprocess_text(text)
+
+        # Apply pronunciation substitutions for Piper only — Google TTS handles
+        # these names well on its own and the phonetic spellings would sound odd.
+        if backend == "piper":
+            extra_pronounce = tts_cfg.get("pronounce")  # per-DJ overrides
+            text = _apply_pronounce_table(text, extra_pronounce)
 
         cache_key = hashlib.sha256(f"{voice_id}:{text}".encode()).hexdigest()[:16]
         out_path = self.dj_clips_dir / f"dj_{cache_key}.mp3"
@@ -178,13 +271,10 @@ class TTSEngine:
         """
         Clean up text for TTS.
         - Strip asterisks (often used by LLM for emphasis or stage directions)
-        - Replace 'in' endings with 'en' to avoid 'ing' artifacts in some voices
-          (e.g., 'Smokin' -> 'Smoken') as requested in GEMINI.md.
+        - Replace trailing 'in\'' with 'en' to avoid dropped-g artifacts in
+          some Piper voices  (e.g. 'Smokin\'' → 'Smoken').
         """
-        import re
-        # Remove asterisks
         text = text.replace("*", "")
-        # Fix "in'" or "in " at end of words for more natural "ing" sound
         text = re.sub(r"(\w+)in'(\W|$)", r"\1en\2", text)
         return text.strip()
 

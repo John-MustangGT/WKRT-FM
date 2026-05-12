@@ -130,6 +130,10 @@ voice_model = "en_US-lessac-high"
 speed       = 0.92
 noise_scale = 0.667
 noise_w     = 0.8
+# Per-DJ pronunciation overrides for Piper/espeak-ng.
+# These are applied on top of the built-in table in wkrt/tts.py.
+# Use phonetic spellings that espeak-ng renders the way you want.
+# pronounce = { "Scorpions" = "Score-pee-ons", "Foreigner" = "For-ner" }
 
 # ── Azure OpenAI DJ (Copilot-powered) ────────────────────────────────────────
 # Requires:  pip install openai
