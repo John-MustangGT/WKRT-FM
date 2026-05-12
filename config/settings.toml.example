@@ -12,6 +12,12 @@ dj_clips_dir = "./dj_clips"
 voices_dir = "./voices"
 log_dir = "./logs"
 
+[logging]
+# Days of rolled log files to keep.  Logs rotate daily at midnight and on
+# every restart.  The active file is always logs/wkrt.log; rolled files are
+# named wkrt.log.YYYY-MM-DD.
+keep_days = 10
+
 [playlist]
 # How many tracks to pre-generate ahead in the spool
 lookahead = 3
