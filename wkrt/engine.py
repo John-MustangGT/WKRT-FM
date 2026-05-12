@@ -51,14 +51,23 @@ log = logging.getLogger(__name__)
 def setup_logging(log_dir: str):
     log_path = Path(log_dir) / "wkrt.log"
     Path(log_dir).mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-        handlers=[
-            logging.FileHandler(log_path),
-            logging.StreamHandler(),
-        ],
-    )
+
+    # systemd sets JOURNAL_STREAM when stdout/stderr are connected to the journal.
+    # In that case journald already stamps every line, so strip the timestamp from
+    # the stderr handler to avoid the redundant prefix shown in `journalctl`.
+    import os
+    under_systemd = bool(os.environ.get("JOURNAL_STREAM") or os.environ.get("INVOCATION_ID"))
+    console_fmt = "%(levelname)-7s %(name)s: %(message)s" if under_systemd else \
+                  "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+    file_fmt = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(logging.Formatter(file_fmt))
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(logging.Formatter(console_fmt))
+
+    logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
 
 
 class WKRTEngine:
