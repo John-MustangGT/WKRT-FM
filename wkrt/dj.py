@@ -190,7 +190,7 @@ class DJEngine:
         self.persona = dj_cfg["persona"].strip()
         self.station = cfg["station"]
         self.clip_weights = dj_cfg["clip_types"]
-        self.timezone = cfg["station"].get("timezone", "UTC")
+        self.timezone = cfg["station"].get("timezone", "America/New_York")
         self._stats = stats
 
         # API health tracking

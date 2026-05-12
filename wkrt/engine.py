@@ -604,7 +604,7 @@ class WKRTEngine:
     def _refill_block_worker(self):
         try:
             dj_cfg  = self.active_dj_cfg()
-            tz      = self.cfg["station"].get("timezone", "UTC")
+            tz      = self.cfg["station"].get("timezone", "America/New_York")
             slot    = current_time_slot(tz)
             ctx     = dict(self.context.get() or {})
             live    = self.state.live_context
@@ -637,7 +637,7 @@ class WKRTEngine:
 
             # Prime block for the active DJ
             dj_cfg    = self.active_dj_cfg()
-            tz        = self.cfg["station"].get("timezone", "UTC")
+            tz        = self.cfg["station"].get("timezone", "America/New_York")
             slot      = current_time_slot(tz)
             user_favs = self._programmer.load_user_favorites()
             block     = self._programmer.program_block(
@@ -722,7 +722,7 @@ class WKRTEngine:
                     return dj_cfg
         import datetime as _dt
         from zoneinfo import ZoneInfo
-        hour = _dt.datetime.now(ZoneInfo(self.cfg["station"].get("timezone", "UTC"))).hour
+        hour = _dt.datetime.now(ZoneInfo(self.cfg["station"].get("timezone", "America/New_York"))).hour
         period = sum(d["shift_hours"] for d in self._dj_configs)
         block = hour % period
         cumulative = 0
@@ -854,7 +854,7 @@ class WKRTEngine:
         if not prev_engine or not next_engine:
             return
 
-        tz       = self.cfg["station"].get("timezone", "UTC")
+        tz       = self.cfg["station"].get("timezone", "America/New_York")
         next_slot = current_time_slot(tz)
 
         threading.Thread(
@@ -917,7 +917,7 @@ class WKRTEngine:
         self.state.set_now_playing(track, self.next_track)
         self.state.set_cache_state(self.cache.state.name)
         self._update_icy_metadata(f"{track.artist} - {track.title}")
-        tz = self.cfg["station"].get("timezone", "UTC")
+        tz = self.cfg["station"].get("timezone", "America/New_York")
         self._history.record_play(
             track.artist, track.title,
             self.active_dj_cfg()["name"],
