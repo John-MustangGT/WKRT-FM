@@ -17,6 +17,8 @@ log_dir = "./logs"
 lookahead = 3
 # Insert DJ clip every N tracks (0 = never, 1 = every track)
 dj_every_n_tracks = 3
+# How many recently played tracks to exclude from the candidate pool
+# recent_exclude = 10
 # Crossfade duration in seconds
 crossfade_seconds = 3
 # Fade out duration at end of track before DJ clip
