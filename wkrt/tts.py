@@ -1,23 +1,25 @@
 """
-Piper TTS wrapper + Google Cloud TTS backend.
+Piper TTS wrapper + Google Cloud TTS + Kokoro ONNX backend.
 
 synthesize(text, dj_cfg) dispatches to the right backend based on
-dj_cfg["tts_backend"] ("piper" or "google") and caches the result by
-a hash of (voice_id, text) so two DJs saying the same line stay separate.
+dj_cfg["tts_backend"] ("piper", "google", or "kokoro") and caches the
+result by a hash of (voice_id, text) so two DJs saying the same line
+stay separate.
 
 Pronunciation hints
 -------------------
-Piper uses espeak-ng for phonemization, so pronunciation can be guided by
-substituting tricky words/names with phonetic spellings before the text
-reaches Piper.  Two layers are applied (in order):
+Piper and Kokoro accept pronunciation guidance by substituting tricky
+words/names with phonetic spellings before the text reaches the engine.
+Two layers are applied (in order):
 
 1. Built-in table (_PIPER_PRONOUNCE) — common rock-radio names/terms that
-   espeak-ng mispronounces out of the box.
+   espeak-ng / Kokoro mispronounce out of the box.
 2. Per-DJ overrides — set [djs.tts] pronounce = {"word": "spelling"} in
    settings.toml to extend or override the built-in table for that DJ.
 
 Substitutions are case-insensitive whole-word matches.  To keep the Google
-TTS path clean, substitutions are only applied when backend == "piper".
+TTS path clean, substitutions are only applied when backend is "piper" or
+"kokoro".
 """
 import hashlib
 import logging
@@ -115,6 +117,7 @@ class TTSEngine:
 
         self._piper_bin = shutil.which("piper") or shutil.which("piper-tts")
         self._ffmpeg_bin = shutil.which("ffmpeg")
+        self._kokoro_instances: dict = {}  # model_path → Kokoro instance
 
         if not self._piper_bin:
             log.warning("piper binary not found — Piper TTS will produce silent clips")
@@ -128,13 +131,19 @@ class TTSEngine:
         """
         tts_cfg = dj_cfg.get("tts", {})
         backend = dj_cfg.get("tts_backend", "piper")
-        voice_id = tts_cfg.get("voice_model") or tts_cfg.get("google_voice", "default")
+        voice_id = (
+            tts_cfg.get("voice_model")
+            or tts_cfg.get("google_voice")
+            or tts_cfg.get("kokoro_voice")
+            or "default"
+        )
 
         text = self._preprocess_text(text)
 
-        # Apply pronunciation substitutions for Piper only — Google TTS handles
-        # these names well on its own and the phonetic spellings would sound odd.
-        if backend == "piper":
+        # Apply pronunciation substitutions for Piper and Kokoro — Google TTS
+        # handles these names well on its own and the phonetic spellings would
+        # sound odd through its neural pipeline.
+        if backend in ("piper", "kokoro"):
             extra_pronounce = tts_cfg.get("pronounce")  # per-DJ overrides
             text = _apply_pronounce_table(text, extra_pronounce)
 
@@ -149,6 +158,8 @@ class TTSEngine:
         try:
             if backend == "google":
                 wav_path = self._google_tts(text, tts_cfg)
+            elif backend == "kokoro":
+                wav_path = self._kokoro_tts(text, tts_cfg)
             else:
                 wav_path = self._piper_tts(text, tts_cfg)
             self._wav_to_mp3(wav_path, out_path)
@@ -235,6 +246,55 @@ class TTSEngine:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp.write(response.audio_content)
             return Path(tmp.name)
+
+    # ── Kokoro ONNX backend ───────────────────────────────────────────────────
+
+    def _kokoro_tts(self, text: str, tts_cfg: dict) -> Path:
+        try:
+            import soundfile as sf
+            from kokoro_onnx import Kokoro
+        except ImportError:
+            log.error("kokoro-onnx or soundfile not installed — pip install kokoro-onnx soundfile")
+            return self._silence_wav()
+
+        model_file = tts_cfg.get("kokoro_model", "kokoro-v0_19.onnx")
+        voices_file = tts_cfg.get("kokoro_voices", "kokoro-voices.bin")
+        model_path = self.voices_dir / model_file
+        voices_path = self.voices_dir / voices_file
+
+        if not model_path.exists():
+            log.warning(f"Kokoro model {model_file!r} not found at {model_path} — generating silence")
+            return self._silence_wav()
+        if not voices_path.exists():
+            log.warning(f"Kokoro voices file {voices_file!r} not found at {voices_path} — generating silence")
+            return self._silence_wav()
+
+        instance_key = str(model_path)
+        if instance_key not in self._kokoro_instances:
+            log.info(f"Loading Kokoro model: {model_path}")
+            self._kokoro_instances[instance_key] = Kokoro(str(model_path), str(voices_path))
+        kokoro = self._kokoro_instances[instance_key]
+
+        voice = tts_cfg.get("kokoro_voice", "af_heart")
+        speed = float(tts_cfg.get("speed", 1.0))
+        lang = tts_cfg.get("lang", "en-us")
+
+        try:
+            samples, sample_rate = kokoro.create(text, voice=voice, speed=speed, lang=lang)
+        except Exception as e:
+            log.error(f"Kokoro synthesis failed: {e} — falling back to silence")
+            return self._silence_wav()
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            wav_path = Path(tmp.name)
+        try:
+            sf.write(str(wav_path), samples, sample_rate)
+        except Exception as e:
+            log.error(f"soundfile write failed: {e} — falling back to silence")
+            wav_path.unlink(missing_ok=True)
+            return self._silence_wav()
+
+        return wav_path
 
     # ── Shared helpers ────────────────────────────────────────────────────────
 
