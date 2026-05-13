@@ -94,7 +94,7 @@ class WKRTEngine:
     def __init__(self, config_path: Optional[str] = None):
         from pathlib import Path as _Path
         base = _Path(__file__).parent.parent
-        self.cfg = load()
+        self.cfg = load(_Path(config_path) if config_path else None)
         self.cfg = resolve_paths(self.cfg, base)
 
         keep_days = self.cfg.get("logging", {}).get("keep_days", 10)
