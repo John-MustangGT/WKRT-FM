@@ -68,19 +68,33 @@ echo ""
 # Install the Python packages first:  pip install kokoro-onnx soundfile
 KOKORO_MODEL="${VOICES_DIR}/kokoro-v0_19.onnx"
 KOKORO_VOICES="${VOICES_DIR}/kokoro-voices.bin"
-KOKORO_HF_BASE="https://huggingface.co/hexgrad/Kokoro-82M/resolve/main"
+# Model files are hosted on the kokoro-onnx GitHub releases (not HuggingFace,
+# which serves git-lfs pointer files instead of the real binaries via curl).
+KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+
+_kokoro_download() {
+    local url="$1" dest="$2" min_bytes="$3" label="$4"
+    curl -L --fail --show-error "$url" -o "$dest"
+    local size
+    size=$(wc -c < "$dest")
+    if [[ "$size" -lt "$min_bytes" ]]; then
+        echo "ERROR: $label download looks wrong (got ${size} bytes, expected ≥${min_bytes})."
+        echo "       Check the URL or download manually: $url"
+        rm -f "$dest"
+        exit 1
+    fi
+    echo "==> Downloaded: $dest (${size} bytes)"
+}
 
 if [[ "${INSTALL_KOKORO:-}" == "1" ]]; then
     echo "==> Downloading Kokoro ONNX model files..."
     if [[ ! -f "$KOKORO_MODEL" ]]; then
-        curl -L "${KOKORO_HF_BASE}/kokoro-v0_19.onnx" -o "$KOKORO_MODEL"
-        echo "==> Downloaded: $KOKORO_MODEL"
+        _kokoro_download "${KOKORO_BASE}/kokoro-v0_19.onnx" "$KOKORO_MODEL" 50000000 "kokoro model"
     else
         echo "==> Kokoro model already present: $KOKORO_MODEL"
     fi
     if [[ ! -f "$KOKORO_VOICES" ]]; then
-        curl -L "${KOKORO_HF_BASE}/voices.bin" -o "$KOKORO_VOICES"
-        echo "==> Downloaded: $KOKORO_VOICES"
+        _kokoro_download "${KOKORO_BASE}/voices.bin" "$KOKORO_VOICES" 1000000 "kokoro voices"
     else
         echo "==> Kokoro voices already present: $KOKORO_VOICES"
     fi
