@@ -655,7 +655,7 @@
       artHtml = `<img class="panel-art" src="data:${d.album_art.mime};base64,${d.album_art.data}" alt="">`;
     } else if (d.album_art && d.album_art.url) {
       artHtml = `<img class="panel-art" src="${esc(d.album_art.url)}" alt=""
-        onerror="this.parentNode.innerHTML='<div class=panel-art-ph>♪</div>'">`;
+        onerror="this.outerHTML='<div class=panel-art-ph>♪</div>'">`;
     }
 
     const infoRows = [
