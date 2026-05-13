@@ -180,3 +180,14 @@ noise_w     = 0.8
 # deployment  = "gpt-4o"             # name of your deployment in Azure AI Studio
 # api_version = "2024-02-01"         # Azure OpenAI API version
 # max_tokens  = 300                  # optional — overrides global [api].max_tokens
+
+# ── Discord webhook (optional) ────────────────────────────────────────────────
+# Post now-playing embeds to a Discord channel.
+# 1. In Discord: Edit Channel → Integrations → Webhooks → New Webhook → Copy URL
+# 2. Paste the URL below and uncomment.
+#
+# [discord]
+# webhook_url    = "https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN"
+# username       = "WKRT-FM 104.7"   # display name in Discord (optional)
+# avatar_url     = ""                 # bot avatar URL (optional)
+# post_dj_script = false              # also post DJ break quotes to Discord

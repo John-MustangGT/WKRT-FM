@@ -45,6 +45,7 @@ from .programmer import DJProgrammer, current_time_slot
 from .annotator import Annotator
 from .history import PlayHistory
 from .dj_stats import DJStats
+from .discord import DiscordNotifier
 
 console = Console()
 log = logging.getLogger(__name__)
@@ -153,6 +154,7 @@ class WKRTEngine:
         self._programmer = DJProgrammer(self.cfg, base / "config")
         self._annotator  = Annotator(base / "config")
         self._history    = PlayHistory(base / "config")
+        self._discord    = DiscordNotifier(self.cfg)
         self._programmed_block: list[Track] = []
         self._block_lock = threading.Lock()
         self._refilling  = threading.Event()
@@ -310,6 +312,9 @@ class WKRTEngine:
             # website reflects what's actually being heard, not what was pre-generated
             if first_dj_text:
                 self.state.set_dj_script(first_dj_text)
+                self._discord.notify_dj_script(
+                    self.active_dj_cfg().get("name", "DJ"), first_dj_text
+                )
             self._play(first_segment, self.current_track, first_dj_at)
 
             # Inject top-of-hour station ID at the first track boundary after :00
@@ -1130,6 +1135,11 @@ class WKRTEngine:
         self.state.set_now_playing(track, self.next_track)
         self.state.set_cache_state(self.cache.state.name)
         self._update_icy_metadata(f"{track.artist} - {track.title}")
+        self._discord.notify_track(
+            track.artist, track.title,
+            year=track.year,
+            dj_name=self.active_dj_cfg().get("name"),
+        )
         tz = self.cfg["station"].get("timezone", "America/New_York")
         self._history.record_play(
             track.artist, track.title,
