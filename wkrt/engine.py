@@ -50,44 +50,47 @@ console = Console()
 log = logging.getLogger(__name__)
 
 
-def setup_logging(log_dir: str, keep_days: int = 10):
-    """Configure logging with daily rotation and startup rollover.
+def setup_logging(log_dir: str, keep_days: int = 10, file_logging: bool = False):
+    """Configure logging.
 
+    When file_logging is True:
     - On every restart a fresh wkrt.log is started; the previous run's log
       is renamed to wkrt.log.YYYY-MM-DD (or .YYYY-MM-DD.N if multiple
       rollovers happen on the same date).
     - Daily midnight rotation is handled automatically by TimedRotatingFileHandler.
-    - keep_days controls how many rolled files are retained (default 10).
-    - Timestamps are suppressed on stderr when running under systemd, since
-      journald already stamps every line.
+    - keep_days controls how many rolled files are retained.
+    Timestamps are suppressed on stderr when running under systemd, since
+    journald already stamps every line.
     """
-    log_path = Path(log_dir) / "wkrt.log"
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
-
-    file_fmt = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
-
-    # TimedRotatingFileHandler rolls at midnight and keeps `keep_days` backups.
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        log_path,
-        when="midnight",
-        backupCount=keep_days,
-        encoding="utf-8",
-        utc=False,
-    )
-    file_handler.setFormatter(logging.Formatter(file_fmt))
-
-    # Roll over immediately on startup if a log from a previous run exists,
-    # so each run gets its own clearly-dated file.
-    if log_path.exists() and log_path.stat().st_size > 0:
-        file_handler.doRollover()
-
     under_systemd = bool(os.environ.get("JOURNAL_STREAM") or os.environ.get("INVOCATION_ID"))
     console_fmt = "%(levelname)-7s %(name)s: %(message)s" if under_systemd else \
                   "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(logging.Formatter(console_fmt))
 
-    logging.basicConfig(level=logging.INFO, handlers=[file_handler, console_handler])
+    handlers: list[logging.Handler] = [console_handler]
+
+    if file_logging:
+        log_path = Path(log_dir) / "wkrt.log"
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+
+        file_fmt = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+        file_handler = logging.handlers.TimedRotatingFileHandler(
+            log_path,
+            when="midnight",
+            backupCount=keep_days,
+            encoding="utf-8",
+            utc=False,
+        )
+        file_handler.setFormatter(logging.Formatter(file_fmt))
+
+        # Roll over immediately on startup so each run gets its own dated file.
+        if log_path.exists() and log_path.stat().st_size > 0:
+            file_handler.doRollover()
+
+        handlers.append(file_handler)
+
+    logging.basicConfig(level=logging.INFO, handlers=handlers)
 
 
 class WKRTEngine:
@@ -101,8 +104,10 @@ class WKRTEngine:
         self.cfg = resolve_paths(self.cfg, base)
         validate(self.cfg)
 
-        keep_days = self.cfg.get("logging", {}).get("keep_days", 10)
-        setup_logging(self.cfg["paths"]["log_dir"], keep_days=keep_days)
+        log_cfg = self.cfg.get("logging", {})
+        keep_days = log_cfg.get("keep_days", 10)
+        file_logging = log_cfg.get("file_logging", False)
+        setup_logging(self.cfg["paths"]["log_dir"], keep_days=keep_days, file_logging=file_logging)
 
         self.dj_every = self.cfg["playlist"]["dj_every_n_tracks"]
         self.track_count = 0

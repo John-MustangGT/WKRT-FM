@@ -13,9 +13,13 @@ voices_dir = "./voices"
 log_dir = "./logs"
 
 [logging]
-# Days of rolled log files to keep.  Logs rotate daily at midnight and on
-# every restart.  The active file is always logs/wkrt.log; rolled files are
-# named wkrt.log.YYYY-MM-DD.
+# Write logs to files under log_dir in addition to stdout/journald.
+# Disabled by default — journald already captures all output when running
+# under systemd, so file logs are redundant in production.
+file_logging = false
+# Days of rolled log files to keep (only relevant when file_logging = true).
+# Logs rotate daily at midnight and on every restart.  The active file is
+# always logs/wkrt.log; rolled files are named wkrt.log.YYYY-MM-DD.
 keep_days = 10
 
 [playlist]
