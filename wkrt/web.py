@@ -35,10 +35,11 @@ import collections
 import json
 import logging
 import re
+import secrets
 import threading
 import time
 import xml.etree.ElementTree as ET
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -48,10 +49,26 @@ log = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 
 # ── Per-IP auth rate limiter ──────────────────────────────────────────────────
-_auth_failures: dict = collections.defaultdict(list)   # ip -> [timestamp, ...]
+_auth_failures: dict = collections.defaultdict(list)  # ip -> [timestamp, ...]
 _auth_lock = threading.Lock()
-_AUTH_WINDOW_SECS = 60    # sliding window length
-_AUTH_MAX_FAILS   = 5     # max failures before 429
+_AUTH_WINDOW_SECS = 60             # sliding window length
+_AUTH_MAX_FAILS   = 5              # max failures allowed before 429
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if the IP is allowed to attempt auth, False if rate-limited."""
+    now = time.monotonic()
+    with _auth_lock:
+        timestamps = _auth_failures[ip]
+        # Prune old entries outside the window
+        _auth_failures[ip] = [t for t in timestamps if now - t < _AUTH_WINDOW_SECS]
+        return len(_auth_failures[ip]) < _AUTH_MAX_FAILS
+
+
+def _record_auth_failure(ip: str):
+    now = time.monotonic()
+    with _auth_lock:
+        _auth_failures[ip].append(now)
 
 
 def _prom_labels(labels: dict | None) -> str:
@@ -79,15 +96,25 @@ class _Handler(BaseHTTPRequestHandler):
         pw = self.__class__._admin_password
         if not pw:
             return True
+        ip = self.client_address[0]
+        if not _check_rate_limit(ip):
+            self.send_response(429)
+            self.send_header("Content-Type", "text/plain")
+            body = b"Too Many Requests"
+            self.send_header("Content-Length", len(body))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Basic "):
             try:
                 creds = base64.b64decode(auth[6:]).decode()
                 _, given = creds.split(":", 1)
-                if given == pw:
+                if secrets.compare_digest(given, pw):
                     return True
             except Exception:
                 pass
+        _record_auth_failure(ip)
         self.send_response(401)
         self.send_header("WWW-Authenticate", 'Basic realm="WKRT Admin"')
         self.send_header("Content-Type", "text/plain")
@@ -125,7 +152,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/library/state":
             if not self._require_admin():
                 return
-            state = self.engine._programmer.load_library_state() if self.engine else {}
+            state = self.engine.get_library_state() if self.engine else {}
             self._respond(200, "application/json", json.dumps(state).encode())
         elif self.path == "/api/listeners":
             if not self._require_admin():
@@ -163,7 +190,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/favorites/user":
             if not self._require_admin():
                 return
-            favs = self.engine._programmer.load_user_favorites() if self.engine else []
+            favs = self.engine.get_user_favorites() if self.engine else []
             self._respond(200, "application/json", json.dumps(favs).encode())
 
         elif self.path.startswith("/api/track"):
@@ -179,15 +206,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/dj-stats":
             if not self.engine:
                 return self._respond(503, "text/plain", b"Engine not available")
-            stats = self.engine._dj_stats.to_dict()
-            # Augment with live health status from each engine
-            for dj_cfg in self.engine._dj_configs:
-                name = dj_cfg["name"]
-                eng  = self.engine._dj_engines.get(name)
-                if eng and name in stats:
-                    stats[name]["api_healthy"] = eng.is_api_healthy
-                elif name not in stats:
-                    stats[name] = {"api_healthy": eng.is_api_healthy if eng else False}
+            stats = self.engine.get_dj_stats()
             self._respond(200, "application/json", json.dumps(stats).encode())
 
         else:
@@ -196,7 +215,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if not self._require_admin():
                     return
                 name = m.group(1)
-                data = self.engine._programmer.load_dj_favorites(name)
+                data = self.engine.get_dj_favorites(name)
                 self._respond(200, "application/json", json.dumps(data).encode())
             else:
                 self._respond(404, "text/plain", b"Not found")
@@ -216,7 +235,7 @@ class _Handler(BaseHTTPRequestHandler):
                 name = json.loads(body).get("name") if body else None
             except (ValueError, AttributeError):
                 return self._respond(400, "text/plain", b"Invalid JSON")
-            if name and name not in [d["name"] for d in self.engine._dj_configs]:
+            if name and name not in self.engine.get_dj_names():
                 return self._respond(400, "text/plain", b"Unknown DJ name")
             self.engine.set_dj_override(name or None)
             self._respond(200, "application/json", b'{"ok":true}')
@@ -286,7 +305,7 @@ class _Handler(BaseHTTPRequestHandler):
                 year   = int(req["year"])
             except (ValueError, KeyError, TypeError):
                 return self._respond(400, "text/plain", b"Invalid JSON - need artist, title, year")
-            self.engine._programmer.add_user_favorite(artist, title, year)
+            self.engine.add_user_favorite(artist, title, year)
             self._respond(200, "application/json", b'{"ok":true}')
 
         elif self.path == "/api/favorites/user/remove":
@@ -298,13 +317,13 @@ class _Handler(BaseHTTPRequestHandler):
                 title  = str(req["title"])
             except (ValueError, KeyError, TypeError):
                 return self._respond(400, "text/plain", b"Invalid JSON - need artist, title")
-            self.engine._programmer.remove_user_favorite(artist, title)
+            self.engine.remove_user_favorite(artist, title)
             self._respond(200, "application/json", b'{"ok":true}')
 
         elif self.path == "/api/dj-stats/reset":
             if not self.engine:
                 return self._respond(503, "text/plain", b"Engine not available")
-            self.engine._dj_stats.reset()
+            self.engine.reset_dj_stats()
             self._respond(200, "application/json", b'{"ok":true}')
 
         else:
@@ -320,7 +339,7 @@ class _Handler(BaseHTTPRequestHandler):
             if m and self.engine:
                 idx = int(m.group(1))
                 action = m.group(2)
-                if idx >= len(self.engine._targets):
+                if idx >= self.engine.get_stream_target_count():
                     return self._respond(404, "text/plain", b"Target index out of range")
                 if action == "enable":
                     self.engine.enable_target(idx)
@@ -352,19 +371,15 @@ class _Handler(BaseHTTPRequestHandler):
         if not self.engine:
             body = json.dumps({"ok": False, "error": "Engine not running"}).encode()
             return self._respond(503, "application/json", body)
-        unhealthy_djs = [
-            n for n, e in self.engine._dj_engines.items() if not e.is_api_healthy
-        ]
-        connected_targets = sum(
-            1 for p in self.engine._stream_procs if p is not None and p.poll() is None
-        )
+        unhealthy_djs = self.engine.get_unhealthy_djs()
+        connected_targets = self.engine.get_connected_stream_count()
         cache_state = self.engine.cache.state.name
         ok = cache_state in ("WARM", "RUNNING", "COOLING") and not unhealthy_djs
         status = {
             "ok": ok,
             "cache_state": cache_state,
             "stream_targets_connected": connected_targets,
-            "stream_targets_total": len(self.engine._targets),
+            "stream_targets_total": self.engine.get_stream_target_count(),
             "api_healthy": not unhealthy_djs,
             "unhealthy_djs": unhealthy_djs,
             "tracks_played": self.engine.track_count,
@@ -432,8 +447,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         # ── DJ API stats ──────────────────────────────────────────────────────
         if self.engine:
-            dj_data  = self.engine._dj_stats.to_dict()
-            engines  = self.engine._dj_engines
+            dj_data = self.engine.get_dj_stats()
+            health  = self.engine.get_dj_api_health()
 
             c("wkrt_dj_api_calls_total",
               "Claude API calls made per DJ",
@@ -484,10 +499,8 @@ class _Handler(BaseHTTPRequestHandler):
             # Live API health from engine (not from persisted stats)
             lines.append("# HELP wkrt_dj_api_healthy Whether DJ Claude API is healthy (1=yes 0=no)")
             lines.append("# TYPE wkrt_dj_api_healthy gauge")
-            for dj_cfg in self.engine._dj_configs:
-                n   = dj_cfg["name"]
-                eng = engines.get(n)
-                val = 1 if (eng and eng.is_api_healthy) else 0
+            for n, healthy in health.items():
+                val = 1 if healthy else 0
                 lines.append(f'wkrt_dj_api_healthy{{dj="{n}"}} {val}')
 
         lines.append("")   # trailing newline
@@ -667,7 +680,12 @@ class WebServer:
         _Handler.engine = engine
         _Handler._admin_password = admin_password
         _Handler._ice_cfg = ice_cfg or {}
-        self._server = HTTPServer((host, port), _Handler)
+        if not admin_password:
+            log.error(
+                "WKRT_ADMIN_PASSWORD is not set — admin endpoints have no authentication. "
+                "Set WKRT_ADMIN_PASSWORD or [web].admin_password in settings.toml."
+            )
+        self._server = ThreadingHTTPServer((host, port), _Handler)
         self._port = port
 
     def start(self):

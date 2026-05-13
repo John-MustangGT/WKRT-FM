@@ -53,3 +53,37 @@ def resolve_paths(cfg: dict, base: Path) -> dict:
         if not p.is_absolute():
             cfg["paths"][key] = str(base / p)
     return cfg
+
+
+def validate(cfg: dict) -> None:
+    """Validate required config sections and keys; raise ValueError with a clear message on failure."""
+    errors: list[str] = []
+
+    # Station basics
+    if "station" not in cfg:
+        errors.append("Missing required section [station]")
+
+    # Required path keys
+    paths = cfg.get("paths", {})
+    for key in ("music_dir", "spool_dir", "dj_clips_dir", "voices_dir", "log_dir"):
+        if key not in paths:
+            errors.append(f"Missing required key: [paths] {key}")
+
+    # Playlist
+    playlist = cfg.get("playlist", {})
+    if "dj_every_n_tracks" not in playlist:
+        errors.append("Missing required key: [playlist] dj_every_n_tracks")
+
+    # DJ roster
+    djs = cfg.get("djs", [])
+    if not djs:
+        errors.append("No [[djs]] entries found — at least one DJ must be defined")
+    else:
+        for i, dj in enumerate(djs):
+            for key in ("name", "shift_hours"):
+                if key not in dj:
+                    errors.append(f"[[djs]] entry {i} is missing required key '{key}'")
+
+    if errors:
+        msg = "Configuration validation failed:\n" + "\n".join(f"  • {e}" for e in errors)
+        raise ValueError(msg)
