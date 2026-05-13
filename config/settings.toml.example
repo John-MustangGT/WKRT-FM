@@ -213,6 +213,37 @@ noise_w     = 0.8
 # api_version = "2024-02-01"         # Azure OpenAI API version
 # max_tokens  = 300                  # optional — overrides global [api].max_tokens
 
+# ── Kokoro ONNX DJ (local neural TTS, no cloud or binary required) ────────────
+# Requires:  pip install kokoro-onnx soundfile
+# Download model files from https://huggingface.co/hexgrad/Kokoro-82M:
+#   kokoro-v0_19.onnx  → voices/kokoro-v0_19.onnx
+#   voices.bin         → voices/kokoro-voices.bin
+# Available voices: af_heart, af_bella, af_sky, af_nicole,
+#                   am_adam, am_michael, bm_lewis, bf_emma
+#
+# [[djs]]
+# name        = "Echo"
+# shift_hours = 12
+# tts_backend = "kokoro"
+# persona = """
+# You are Echo, the midday DJ on WKRT 104.7.
+# You're energetic, warm, and love classic rock deep cuts.
+# Keep it real — one or two sentences, no filler.
+# """
+#
+# [djs.clip_types]
+# between_tracks = 0.60
+# trivia         = 0.20
+# dedication     = 0.10
+# station_id     = 0.10
+#
+# [djs.tts]
+# kokoro_voice  = "af_heart"           # voice name from Kokoro
+# kokoro_model  = "kokoro-v0_19.onnx"  # relative to voices_dir
+# kokoro_voices = "kokoro-voices.bin"  # relative to voices_dir
+# speed         = 1.0                  # speaking rate (0.5–2.0)
+# lang          = "en-us"              # language code
+
 # ── Discord webhook (optional) ────────────────────────────────────────────────
 # Post now-playing embeds to a Discord channel.
 # 1. In Discord: Edit Channel → Integrations → Webhooks → New Webhook → Copy URL

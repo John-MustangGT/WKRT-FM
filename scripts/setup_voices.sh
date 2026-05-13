@@ -62,5 +62,33 @@ else
 fi
 
 echo ""
+
+# ── Kokoro ONNX model files (optional) ──────────────────────────────────────
+# Only needed if any DJ uses tts_backend = "kokoro" in settings.toml.
+# Install the Python packages first:  pip install kokoro-onnx soundfile
+KOKORO_MODEL="${VOICES_DIR}/kokoro-v0_19.onnx"
+KOKORO_VOICES="${VOICES_DIR}/kokoro-voices.bin"
+KOKORO_HF_BASE="https://huggingface.co/hexgrad/Kokoro-82M/resolve/main"
+
+if [[ "${INSTALL_KOKORO:-}" == "1" ]]; then
+    echo "==> Downloading Kokoro ONNX model files..."
+    if [[ ! -f "$KOKORO_MODEL" ]]; then
+        curl -L "${KOKORO_HF_BASE}/kokoro-v0_19.onnx" -o "$KOKORO_MODEL"
+        echo "==> Downloaded: $KOKORO_MODEL"
+    else
+        echo "==> Kokoro model already present: $KOKORO_MODEL"
+    fi
+    if [[ ! -f "$KOKORO_VOICES" ]]; then
+        curl -L "${KOKORO_HF_BASE}/voices.bin" -o "$KOKORO_VOICES"
+        echo "==> Downloaded: $KOKORO_VOICES"
+    else
+        echo "==> Kokoro voices already present: $KOKORO_VOICES"
+    fi
+else
+    echo "==> Skipping Kokoro model download (set INSTALL_KOKORO=1 to download)."
+    echo "    e.g.: INSTALL_KOKORO=1 bash scripts/setup_voices.sh"
+fi
+
+echo ""
 echo "==> Done. Test with:"
 echo "    python main.py --test-tts \"You're listening to WKRT, 104.7 FM.\""

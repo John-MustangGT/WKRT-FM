@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-WKRT-FM 104.7 — a Python-based retro 80s radio station engine. It scans a music library, generates AI DJ banter via the Claude API (Anthropic), synthesizes voice via Piper TTS or Google Cloud TTS, and stitches everything together with ffmpeg into a continuous stream playable via ffplay or piped to Icecast.
+WKRT-FM 104.7 — a Python-based retro 80s radio station engine. It scans a music library, generates AI DJ banter via the Claude API (Anthropic), synthesizes voice via Piper TTS, Google Cloud TTS, or Kokoro ONNX, and stitches everything together with ffmpeg into a continuous stream playable via ffplay or piped to Icecast.
 
 Target platform: Raspberry Pi Zero 2W or any Linux box.
 
@@ -118,6 +118,7 @@ DJs are defined as `[[djs]]` entries in `settings.toml`. Each has:
 
 - **`piper`** — local binary; voice model file must exist at `voices/<model>.onnx`. Falls back to 4-second silence if model is missing.
 - **`google`** — Google Cloud TTS; requires `GOOGLE_APPLICATION_CREDENTIALS` (or `WKRT_GOOGLE_CREDENTIALS`). Uses `en-US-Studio-*` voices. Falls back to silence on auth/network failure.
+- **`kokoro`** — Kokoro ONNX neural TTS; requires `pip install kokoro-onnx soundfile` and model files at `voices/kokoro-v0_19.onnx` + `voices/kokoro-voices.bin` (download via `INSTALL_KOKORO=1 bash scripts/setup_voices.sh`). No cloud account or external binary needed. ONNX model instance is cached in memory after first load. Pronunciation substitutions are applied (same table as Piper). Falls back to silence if files are missing.
 
 Cache key is SHA-256 of `"<voice_id>:<text>"` — two DJs saying the same line produce separate cached files.
 
