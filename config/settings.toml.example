@@ -173,6 +173,38 @@ noise_w     = 0.8
 # [djs.tts]
 # google_voice   = "en-US-Studio-M"
 # speaking_rate  = 1.0
+
+# ── Example: Overnight DJ running on local Ollama (no API key required) ───────
+# A spare, no-frills voice that holds down the late shift while the main DJs rest.
+# Runs entirely on-device — good for Pi/LXC deployments with Ollama installed.
+#
+# [[djs]]
+# name        = "Static"
+# shift_hours = 8                    # e.g. 22:00–06:00
+# tts_backend = "piper"
+# api_backend = "ollama"
+# persona = """
+# You are Static, the overnight automation DJ on WKRT 104.7.
+# You are sparse and unfussy — a steady hand through the small hours.
+# No jokes. No hype. Just the facts: artist, song, year, call sign.
+# One or two sentences max. Keep the city company without waking it up.
+# """
+#
+# [djs.clip_types]
+# between_tracks = 0.50
+# trivia         = 0.15
+# dedication     = 0.05
+# station_id     = 0.30             # lean on station IDs — reliable without a good model
+#
+# [djs.tts]
+# voice_model = "en_US-lessac-high"
+# speed       = 0.88               # slightly slower for late-night feel
+#
+# [djs.ollama]
+# host       = "localhost"          # Ollama host (or LAN IP)
+# port       = 11434
+# model      = "llama3"             # any model pulled via `ollama pull <model>`
+# max_tokens = 120                  # keep it short — this DJ doesn't ramble
 #
 # [djs.azure]
 # endpoint    = "https://YOUR-RESOURCE-NAME.openai.azure.com/"

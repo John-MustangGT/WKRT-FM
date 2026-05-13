@@ -1,19 +1,23 @@
 """
 DJ script generator.
-Calls Claude API (Anthropic) or Azure OpenAI to generate contextual radio DJ banter.
-Returns plain text scripts ready for TTS.
+Calls Claude API (Anthropic), Azure OpenAI, or a local Ollama instance to
+generate contextual radio DJ banter.  Returns plain text scripts ready for TTS.
 
 Supported api_backend values (set per [[djs]] entry in settings.toml):
   "anthropic"    — default, uses claude-* models via Anthropic API
   "azure_openai" — uses any Azure OpenAI deployment (GPT-4o, etc.)
+  "ollama"       — local Ollama instance; no API key required
 """
 import datetime
+import json
 import random
 import logging
 import time
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import anthropic
@@ -207,6 +211,8 @@ class DJEngine:
 
         if self._api_backend == "azure_openai":
             self.client = self._build_azure_client(cfg, dj_cfg)
+        elif self._api_backend == "ollama":
+            self.client = dj_cfg.get("ollama", {})  # just the config dict
         else:
             # Default: Anthropic / Claude
             self._api_backend = "anthropic"
@@ -420,6 +426,8 @@ class DJEngine:
         try:
             if self._api_backend == "azure_openai":
                 text, input_tokens, output_tokens = self._call_azure(prompt)
+            elif self._api_backend == "ollama":
+                text, input_tokens, output_tokens = self._call_ollama(prompt)
             else:
                 text, input_tokens, output_tokens = self._call_anthropic(prompt)
 
@@ -489,6 +497,36 @@ class DJEngine:
             usage.prompt_tokens     if usage else 0,
             usage.completion_tokens if usage else 0,
         )
+
+    def _call_ollama(self, prompt: str) -> tuple[str, int, int]:
+        """Call a local Ollama instance via its OpenAI-compatible endpoint."""
+        ollama_cfg = self.client  # dict stored at init
+        host  = ollama_cfg.get("host", "localhost")
+        port  = ollama_cfg.get("port", 11434)
+        model = ollama_cfg.get("model", "llama3")
+        max_tokens = ollama_cfg.get("max_tokens") or self.cfg["api"]["max_tokens"]
+
+        payload = json.dumps({
+            "model": model,
+            "stream": False,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": self.persona},
+                {"role": "user",   "content": prompt},
+            ],
+        }).encode()
+
+        url = f"http://{host}:{port}/v1/chat/completions"
+        req = Request(url, data=payload, headers={"Content-Type": "application/json"})
+        try:
+            with urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except URLError as e:
+            raise RuntimeError(f"Ollama unreachable at {url}: {e}") from e
+
+        text = (data["choices"][0]["message"]["content"] or "").strip()
+        usage = data.get("usage", {})
+        return text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
     def _fallback_script(self) -> str:
         """Used when API is unavailable."""
