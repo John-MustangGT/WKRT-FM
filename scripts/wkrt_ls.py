@@ -19,7 +19,7 @@ from collections import defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from wkrt import config as wkrt_config
 from wkrt.playlist import scan_library, Track

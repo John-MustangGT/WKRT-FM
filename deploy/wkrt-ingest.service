@@ -7,6 +7,6 @@ Type=oneshot
 User=roxanne
 WorkingDirectory=/home/roxanne/wkrt
 EnvironmentFile=-/home/roxanne/wkrt/.env
-ExecStart=/usr/bin/python3 /home/roxanne/wkrt/wkrt_ingest.py
+ExecStart=/usr/bin/python3 /home/roxanne/wkrt/scripts/wkrt_ingest.py
 StandardOutput=journal
 StandardError=journal

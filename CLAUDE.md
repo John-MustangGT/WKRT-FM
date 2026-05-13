@@ -15,7 +15,7 @@ Target platform: Raspberry Pi Zero 2W or any Linux box.
 pip install -r requirements.txt
 
 # Download Piper voice model
-bash setup_voices.sh
+bash scripts/setup_voices.sh
 
 # Run the station
 python main.py
@@ -30,14 +30,14 @@ python main.py --test-dj
 python main.py --test-tts "You're listening to WKRT 104.7"
 
 # Analyze existing music collection for coverage vs. the master tracklist
-python wkrt_analyze.py /path/to/mp3-listing.txt
+python scripts/wkrt_analyze.py /path/to/mp3-listing.txt
 
 # Copy matched tracks into the year-based layout (dry-run first)
-python wkrt_organize.py --src /path/to/music --dst ./music --dry-run
-python wkrt_organize.py --src /path/to/music --dst ./music
+python scripts/wkrt_organize.py --src /path/to/music --dst ./music --dry-run
+python scripts/wkrt_organize.py --src /path/to/music --dst ./music
 
 # Ingest new tracks into a running station (notifies engine via HTTP)
-python wkrt_ingest.py /path/to/new/track.mp3 [...]
+python scripts/wkrt_ingest.py /path/to/new/track.mp3 [...]
 ```
 
 ### System dependencies
@@ -46,7 +46,7 @@ python wkrt_ingest.py /path/to/new/track.mp3 [...]
 
 ### Configuration
 
-Edit `config/settings.toml` (gitignored — never committed). Copy `.env_example` to `.env` and fill in secrets. The systemd unit (`wkrt-fm.service`) is the canonical way to inject env vars in production.
+Edit `config/settings.toml` (gitignored — never committed). Copy `.env_example` to `.env` and fill in secrets. The systemd unit (`deploy/wkrt-fm.service`) is the canonical way to inject env vars in production.
 
 | Env var | Overrides | Required |
 |---|---|---|
@@ -302,8 +302,8 @@ music/
 ### Production deployment
 
 ```bash
-# Adjust User= and WorkingDirectory= in wkrt-fm.service, then:
-sudo cp wkrt-fm.service /etc/systemd/system/
+# Adjust User= and WorkingDirectory= in deploy/wkrt-fm.service, then:
+sudo cp deploy/wkrt-fm.service /etc/systemd/system/
 sudo systemctl enable --now wkrt-fm
 sudo journalctl -u wkrt-fm -f
 ```

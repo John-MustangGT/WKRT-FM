@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)
 
 def test_neon():
     # Load config
-    base = Path(__file__).parent
+    base = Path(__file__).parent.parent
     cfg = load()
     cfg = resolve_paths(cfg, base)
     

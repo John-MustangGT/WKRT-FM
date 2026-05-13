@@ -52,7 +52,7 @@ def load_admin_password() -> str:
     env = os.environ.get("WKRT_ADMIN_PASSWORD", "")
     if env:
         return env
-    cfg_path = Path(__file__).parent / "config" / "settings.toml"
+    cfg_path = Path(__file__).parent.parent / "config" / "settings.toml"
     if cfg_path.exists():
         try:
             try:
