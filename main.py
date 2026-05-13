@@ -27,7 +27,8 @@ def main():
 
     from wkrt.config import load, resolve_paths
     base = Path(__file__).parent
-    cfg = load()
+    config_path = Path(args.config) if args.config else None
+    cfg = load(config_path) if config_path else load()
     cfg = resolve_paths(cfg, base)
 
     if args.scan:
@@ -37,7 +38,7 @@ def main():
     elif args.test_tts:
         _cmd_test_tts(cfg, args.test_tts)
     else:
-        _cmd_run(cfg)
+        _cmd_run(cfg, config_path=Path(args.config) if args.config else None)
 
 
 def _cmd_scan(cfg):
@@ -128,11 +129,11 @@ def _cmd_test_tts(cfg, text: str):
         subprocess.run([ffplay, "-nodisp", "-autoexit", "-loglevel", "quiet", str(clip)])
 
 
-def _cmd_run(cfg):
+def _cmd_run(cfg, config_path=None):
     from wkrt.engine import WKRTEngine
     import signal
 
-    engine = WKRTEngine()
+    engine = WKRTEngine(config_path=str(config_path) if config_path else None)
 
     def _sig(sig, frame):
         print("\nStopping WKRT...")

@@ -31,7 +31,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from .config import load, resolve_paths
+from .config import load, resolve_paths, validate
 from .cache import StartupCache, TopOfHourScheduler
 from .hooks import HookServer
 from .playlist import scan_library, PlaylistQueue, Track, AUDIO_EXTENSIONS, _read_tags
@@ -94,8 +94,12 @@ class WKRTEngine:
     def __init__(self, config_path: Optional[str] = None):
         from pathlib import Path as _Path
         base = _Path(__file__).parent.parent
-        self.cfg = load()
+        if config_path:
+            self.cfg = load(_Path(config_path))
+        else:
+            self.cfg = load()
         self.cfg = resolve_paths(self.cfg, base)
+        validate(self.cfg)
 
         keep_days = self.cfg.get("logging", {}).get("keep_days", 10)
         setup_logging(self.cfg["paths"]["log_dir"], keep_days=keep_days)
@@ -150,6 +154,7 @@ class WKRTEngine:
         self._regen_triggered_for: Optional[str] = None
 
         self._listener_count = 0
+        self._listener_lock = threading.Lock()
         self._connect_id_pending = threading.Event()
 
         self.state = StationState(
@@ -784,6 +789,67 @@ class WKRTEngine:
             except Exception as e:
                 log.warning(f"Could not pre-generate fallback clip for {name}: {e}")
 
+    # ── Public accessors (used by web layer) ─────────────────────────────────
+
+    def get_dj_stats(self) -> dict:
+        """Return per-DJ API/TTS stats augmented with live health status."""
+        stats = self._dj_stats.to_dict()
+        for dj_cfg in self._dj_configs:
+            name = dj_cfg["name"]
+            eng = self._dj_engines.get(name)
+            if eng and name in stats:
+                stats[name]["api_healthy"] = eng.is_api_healthy
+            elif name not in stats:
+                stats[name] = {"api_healthy": eng.is_api_healthy if eng else False}
+        return stats
+
+    def get_dj_names(self) -> list[str]:
+        """Return list of configured DJ names."""
+        return [d["name"] for d in self._dj_configs]
+
+    def get_dj_api_health(self) -> dict[str, bool]:
+        """Return dict mapping DJ name → API health flag."""
+        return {
+            name: eng.is_api_healthy
+            for name, eng in self._dj_engines.items()
+        }
+
+    def get_library_state(self) -> dict:
+        """Return library state dict (last_ingest, last_regen)."""
+        return self._programmer.load_library_state()
+
+    def get_user_favorites(self) -> list:
+        """Return the MD Picks (user favorites) list."""
+        return self._programmer.load_user_favorites()
+
+    def get_dj_favorites(self, dj_name: str) -> dict:
+        """Return DJ Crate Picks for the given DJ name."""
+        return self._programmer.load_dj_favorites(dj_name)
+
+    def add_user_favorite(self, artist: str, title: str, year: int):
+        """Add a track to MD Picks."""
+        self._programmer.add_user_favorite(artist, title, year)
+
+    def remove_user_favorite(self, artist: str, title: str):
+        """Remove a track from MD Picks."""
+        self._programmer.remove_user_favorite(artist, title)
+
+    def reset_dj_stats(self):
+        """Clear all accumulated DJ stats."""
+        self._dj_stats.reset()
+
+    def get_stream_target_count(self) -> int:
+        """Return the number of configured stream targets."""
+        return len(self._targets)
+
+    def get_unhealthy_djs(self) -> list[str]:
+        """Return names of DJs whose Claude API is currently degraded."""
+        return [n for n, e in self._dj_engines.items() if not e.is_api_healthy]
+
+    def get_connected_stream_count(self) -> int:
+        """Return how many stream targets are currently connected."""
+        return sum(1 for p in self._stream_procs if p is not None and p.poll() is None)
+
     # ── DJ rotation ───────────────────────────────────────────────────────────
 
     def active_dj_cfg(self) -> dict:
@@ -1136,16 +1202,20 @@ class WKRTEngine:
             self._stop.set()
 
     def _on_listener_connect(self):
-        self._listener_count += 1
-        log.info(f"Listener connected via webhook ({self._listener_count} total)")
-        self.state.set_listener_count(self._listener_count)
+        with self._listener_lock:
+            self._listener_count += 1
+            count = self._listener_count
+        log.info(f"Listener connected via webhook ({count} total)")
+        self.state.set_listener_count(count)
         self._connect_id_pending.set()
         self.cache.on_listener_connect()
 
     def _on_listener_disconnect(self):
-        self._listener_count = max(0, self._listener_count - 1)
-        log.info(f"Listener disconnected via webhook ({self._listener_count} remaining)")
-        self.state.set_listener_count(self._listener_count)
+        with self._listener_lock:
+            self._listener_count = max(0, self._listener_count - 1)
+            count = self._listener_count
+        log.info(f"Listener disconnected via webhook ({count} remaining)")
+        self.state.set_listener_count(count)
         self.cache.on_listener_disconnect()
 
     def _poll_icecast_listeners(self) -> int:
@@ -1179,9 +1249,11 @@ class WKRTEngine:
         time.sleep(10)
         while not self._stop.is_set():
             new_count = self._poll_icecast_listeners()
-            old_count = self._listener_count
+            with self._listener_lock:
+                old_count = self._listener_count
+                if new_count != old_count:
+                    self._listener_count = new_count
             if new_count != old_count:
-                self._listener_count = new_count
                 self.state.set_listener_count(new_count)
                 log.info(f"Listener count (poll): {old_count} → {new_count}")
                 # Drive cache state transitions on boundary changes
