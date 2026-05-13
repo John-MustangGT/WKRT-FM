@@ -6,7 +6,13 @@ build-backend = "setuptools.backends.legacy:build"
 name = "wkrt-fm"
 version = "0.1.0"
 description = "WKRT-FM 104.7 — AI-powered retro 80s internet radio engine"
+readme = "README.md"
 requires-python = ">=3.11"
+# System dependencies (not managed by pip):
+#   ffmpeg, ffprobe, ffplay  — audio processing and playback
+#   piper / piper-tts        — local TTS binary (Piper backend)
+#   icecast2                 — optional, for network streaming
+# Target platforms: Raspberry Pi OS Bookworm, Debian/Ubuntu LXC containers.
 dependencies = [
     "anthropic>=0.25.0",
     "mutagen>=1.47.0",
