@@ -159,7 +159,7 @@ class TestWebServerWarning:
         import logging
         from wkrt.web import WebServer
         state = MagicMock()
-        with caplog.at_level(logging.WARNING, logger="wkrt.web"):
+        with caplog.at_level(logging.ERROR, logger="wkrt.web"):
             ws = WebServer(state=state, port=0, admin_password="")
         assert any("admin_password" in r.message.lower() or "wkrt_admin_password" in r.message.lower()
                    for r in caplog.records)
@@ -168,7 +168,7 @@ class TestWebServerWarning:
         import logging
         from wkrt.web import WebServer
         state = MagicMock()
-        with caplog.at_level(logging.WARNING, logger="wkrt.web"):
+        with caplog.at_level(logging.ERROR, logger="wkrt.web"):
             ws = WebServer(state=state, port=0, admin_password="s3cr3t")
         assert not any("admin_password" in r.message.lower() or "wkrt_admin_password" in r.message.lower()
                        for r in caplog.records)

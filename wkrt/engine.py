@@ -1253,8 +1253,8 @@ class WKRTEngine:
                 old_count = self._listener_count
                 if new_count != old_count:
                     self._listener_count = new_count
+                    self.state.set_listener_count(new_count)
             if new_count != old_count:
-                self.state.set_listener_count(new_count)
                 log.info(f"Listener count (poll): {old_count} → {new_count}")
                 # Drive cache state transitions on boundary changes
                 if old_count == 0 and new_count > 0:

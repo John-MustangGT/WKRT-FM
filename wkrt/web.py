@@ -31,6 +31,7 @@ Routes:
   GET  /metrics                → Prometheus text exposition format  [public]
 """
 import base64
+import collections
 import json
 import logging
 import re
@@ -48,7 +49,7 @@ log = logging.getLogger(__name__)
 _TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 
 # ── Per-IP auth rate limiter ──────────────────────────────────────────────────
-_auth_failures: dict = {}          # ip -> [timestamp, ...]
+_auth_failures: dict = collections.defaultdict(list)  # ip -> [timestamp, ...]
 _auth_lock = threading.Lock()
 _AUTH_WINDOW_SECS = 60             # sliding window length
 _AUTH_MAX_FAILS   = 5              # max failures allowed before 429
@@ -58,17 +59,16 @@ def _check_rate_limit(ip: str) -> bool:
     """Return True if the IP is allowed to attempt auth, False if rate-limited."""
     now = time.monotonic()
     with _auth_lock:
-        timestamps = _auth_failures.get(ip, [])
+        timestamps = _auth_failures[ip]
         # Prune old entries outside the window
-        timestamps = [t for t in timestamps if now - t < _AUTH_WINDOW_SECS]
-        _auth_failures[ip] = timestamps
-        return len(timestamps) < _AUTH_MAX_FAILS
+        _auth_failures[ip] = [t for t in timestamps if now - t < _AUTH_WINDOW_SECS]
+        return len(_auth_failures[ip]) < _AUTH_MAX_FAILS
 
 
 def _record_auth_failure(ip: str):
     now = time.monotonic()
     with _auth_lock:
-        _auth_failures.setdefault(ip, []).append(now)
+        _auth_failures[ip].append(now)
 
 
 def _prom_labels(labels: dict | None) -> str:
@@ -681,7 +681,7 @@ class WebServer:
         _Handler._admin_password = admin_password
         _Handler._ice_cfg = ice_cfg or {}
         if not admin_password:
-            log.warning(
+            log.error(
                 "WKRT_ADMIN_PASSWORD is not set — admin endpoints have no authentication. "
                 "Set WKRT_ADMIN_PASSWORD or [web].admin_password in settings.toml."
             )

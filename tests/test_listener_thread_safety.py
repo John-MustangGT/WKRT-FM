@@ -25,6 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Rather than importing wkrt.engine (which pulls in mutagen, rich, …), we
 # reproduce the exact three listener methods here so the thread-safety logic
 # can be tested in isolation.
+#
+# NOTE: These implementations MUST stay in sync with WKRTEngine._on_listener_connect
+# and _on_listener_disconnect in wkrt/engine.py. If those methods change,
+# update _ListenerMixin below accordingly.
 
 class _ListenerMixin:
     """Minimal listener-count behaviour mirroring WKRTEngine's locked methods."""
