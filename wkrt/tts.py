@@ -275,7 +275,7 @@ class TTSEngine:
             self._kokoro_instances[instance_key] = Kokoro(str(model_path), str(voices_path))
         kokoro = self._kokoro_instances[instance_key]
 
-        voice = tts_cfg.get("kokoro_voice", "af_heart")
+        voice = tts_cfg.get("kokoro_voice", "af_bella")
         speed = float(tts_cfg.get("speed", 1.0))
         lang = tts_cfg.get("lang", "en-us")
 
