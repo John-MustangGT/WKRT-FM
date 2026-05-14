@@ -9,8 +9,7 @@ dj_clips/
 spool/
 logs/
 venv/
-voices/*.onnx
-voices/*.onnx.json
+voices/
 music/
 new_music/*
 !new_music/.gitkeep
