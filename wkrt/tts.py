@@ -257,8 +257,8 @@ class TTSEngine:
             log.error("kokoro-onnx or soundfile not installed — pip install kokoro-onnx soundfile")
             return self._silence_wav()
 
-        model_file = tts_cfg.get("kokoro_model", "kokoro-v0_19.onnx")
-        voices_file = tts_cfg.get("kokoro_voices", "kokoro-voices.bin")
+        model_file = tts_cfg.get("kokoro_model", "kokoro-v1.0.onnx")
+        voices_file = tts_cfg.get("kokoro_voices", "kokoro-voices-v1.0.bin")
         model_path = self.voices_dir / model_file
         voices_path = self.voices_dir / voices_file
 
