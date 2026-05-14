@@ -8,6 +8,7 @@ __pycache__/
 dj_clips/
 spool/
 logs/
+venv/
 voices/*.onnx
 voices/*.onnx.json
 music/

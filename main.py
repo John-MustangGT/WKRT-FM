@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--scan", action="store_true", help="Scan library and print stats")
     parser.add_argument("--test-dj", action="store_true", help="Generate one DJ clip and play it")
     parser.add_argument("--test-tts", type=str, default=None, help="Synthesize a test phrase")
+    parser.add_argument("--dj", type=str, default=None, help="DJ name to use for --test-tts / --test-dj")
     args = parser.parse_args()
 
     # Ensure we can import from this directory
@@ -34,9 +35,9 @@ def main():
     if args.scan:
         _cmd_scan(cfg)
     elif args.test_dj:
-        _cmd_test_dj(cfg)
+        _cmd_test_dj(cfg, dj_name=args.dj)
     elif args.test_tts:
-        _cmd_test_tts(cfg, args.test_tts)
+        _cmd_test_tts(cfg, args.test_tts, dj_name=args.dj)
     else:
         _cmd_run(cfg, config_path=Path(args.config) if args.config else None)
 
@@ -70,7 +71,18 @@ def _cmd_scan(cfg):
     console.print(table)
 
 
-def _cmd_test_dj(cfg):
+def _resolve_dj(cfg, dj_name: str | None) -> dict:
+    djs = cfg.get("djs", [])
+    if dj_name:
+        match = next((d for d in djs if d.get("name", "").lower() == dj_name.lower()), None)
+        if not match:
+            names = ", ".join(d.get("name", "?") for d in djs)
+            raise SystemExit(f"DJ {dj_name!r} not found. Available: {names}")
+        return match
+    return djs[0] if djs else {"name": "DJ", "tts_backend": "piper", "persona": "", "clip_types": {}, "tts": {}}
+
+
+def _cmd_test_dj(cfg, dj_name: str | None = None):
     """Generate a test DJ clip using placeholder tracks."""
     from wkrt.playlist import Track
     from wkrt.dj import DJEngine
@@ -89,8 +101,7 @@ def _cmd_test_dj(cfg):
         artist="Van Halen", title="Jump"
     )
 
-    djs = cfg.get("djs", [])
-    dj_cfg = djs[0] if djs else {"name": "DJ", "tts_backend": "piper", "persona": "", "clip_types": {}, "tts": {}}
+    dj_cfg = _resolve_dj(cfg, dj_name)
 
     console.print(f"[cyan]Generating DJ script as {dj_cfg['name']} via Claude API...[/cyan]")
     dj = DJEngine(cfg, dj_cfg)
@@ -110,15 +121,14 @@ def _cmd_test_dj(cfg):
         console.print("[yellow]ffplay not found — clip saved but not played[/yellow]")
 
 
-def _cmd_test_tts(cfg, text: str):
+def _cmd_test_tts(cfg, text: str, dj_name: str | None = None):
     """Quick TTS test without Claude API."""
     from wkrt.tts import TTSEngine
     from rich.console import Console
     import subprocess, shutil
 
     console = Console()
-    djs = cfg.get("djs", [])
-    dj_cfg = djs[0] if djs else {"name": "DJ", "tts_backend": "piper", "tts": {}}
+    dj_cfg = _resolve_dj(cfg, dj_name)
     tts = TTSEngine(cfg)
     console.print(f"[cyan]Synthesizing as {dj_cfg['name']}:[/cyan] {text}")
     clip = tts.synthesize(text, dj_cfg)
