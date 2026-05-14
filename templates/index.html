@@ -113,6 +113,18 @@
   .player-label { font-size: 0.72rem; color: var(--dim); margin-top: 2px; }
   .volume-wrap { display: flex; align-items: center; gap: 8px; }
   .volume-wrap svg { color: var(--dim); flex-shrink: 0; }
+  #stream-select {
+    display: none;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 6px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    outline: none;
+  }
+  #stream-select:focus { border-color: var(--accent); }
   input[type=range] {
     -webkit-appearance: none;
     width: 80px; height: 4px;
@@ -366,6 +378,7 @@
       <div class="player-track" id="player-track">Click play to start streaming</div>
       <div class="player-label">WKRT-FM 104.7 · Live Stream</div>
     </div>
+    <select id="stream-select" onchange="switchStream(this.value)" title="Stream format"></select>
     <div class="volume-wrap">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
         <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
@@ -436,7 +449,6 @@
   let streamUrl = '';
   let playing = false;
   let lastDjScript = '';
-  let streamReady = false;
 
   const PLAY_SVG  = '<path d="M8 5v14l11-7z"/>';
   const PAUSE_SVG = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
@@ -461,6 +473,17 @@
     audio.volume = parseFloat(v);
   }
 
+  function switchStream(url) {
+    streamUrl = url;
+    if (playing) {
+      // Restart playback on the new stream immediately
+      audio.pause();
+      audio.src = streamUrl;
+      audio.volume = parseFloat(document.getElementById('volume').value);
+      audio.play().catch(() => {});
+    }
+  }
+
   function fmtDate(iso) {
     try {
       const d = new Date(iso);
@@ -478,13 +501,6 @@
       const r = await fetch('/api/status');
       d = await r.json();
     } catch(e) { return; }
-
-    // Build stream URL using the browser's hostname so it works
-    // regardless of whether the server uses "localhost" internally.
-    if (!streamReady && d.stream_port && d.stream_mount) {
-      streamUrl = `http://${window.location.hostname}:${d.stream_port}${d.stream_mount}`;
-      streamReady = true;
-    }
 
     // Listener count
     const lc = d.listener_count || 0;
@@ -560,19 +576,36 @@
       return;
     }
 
-    el.innerHTML = streams.map(s => {
-      // Substitute localhost/127.0.0.1 with the browser host so external
-      // listeners get a URL that works from their machine too.
+    // Resolve URLs substituting localhost with browser hostname for external listeners
+    const resolved = streams.map(s => {
       const host = (s.host === 'localhost' || s.host === '127.0.0.1')
         ? window.location.hostname : s.host;
-      const url = `http://${host}:${s.port}${s.mount}`;
+      return { ...s, resolvedUrl: `http://${host}:${s.port}${s.mount}` };
+    });
+
+    // Populate the player stream selector
+    const sel = document.getElementById('stream-select');
+    sel.innerHTML = resolved.map(s =>
+      `<option value="${esc(s.resolvedUrl)}">${esc(s.name)} (${esc(s.codec || 'mp3')})</option>`
+    ).join('');
+    if (resolved.length > 1) {
+      sel.style.display = 'inline-block';
+    }
+    // Default player to first MP3 stream (Safari can't decode Opus/OGG); fall back to first
+    const preferred = resolved.find(s => (s.codec || 'mp3') === 'mp3') || resolved[0];
+    if (preferred && !streamUrl) {
+      streamUrl = preferred.resolvedUrl;
+      sel.value = streamUrl;
+    }
+
+    el.innerHTML = resolved.map(s => {
       const codec = s.codec || 'mp3';
       const codecClass = codec === 'opus' ? 'codec-opus' : codec === 'aac' ? 'codec-aac' : 'codec-mp3';
       return `<li class="tune-in-item">
         <span class="tune-in-name">${esc(s.name)}</span>
-        <a class="tune-in-url" href="${esc(url)}" target="_blank">${esc(url)}</a>
+        <a class="tune-in-url" href="${esc(s.resolvedUrl)}" target="_blank">${esc(s.resolvedUrl)}</a>
         <span class="tune-in-codec ${codecClass}">${esc(codec)}</span>
-        <button class="copy-btn" onclick="copyUrl(this,'${esc(url)}')">COPY</button>
+        <button class="copy-btn" onclick="copyUrl(this,'${esc(s.resolvedUrl)}')" >COPY</button>
       </li>`;
     }).join('');
   }
