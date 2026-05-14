@@ -22,7 +22,7 @@ music/<year>/*.mp3  ──►  PlaylistQueue  ──►  WKRTEngine (main loop)
                         (Claude API)                                          │
                                │                                              │
                             TTSEngine                                         │
-                      (Piper or Google TTS)                                   │
+                      (Piper, Google, Kokoro)                                 │
                                │                                              │
                             Mixer (ffmpeg) ────────────────────────────────── ┘
                                │
@@ -36,10 +36,10 @@ music/<year>/*.mp3  ──►  PlaylistQueue  ──►  WKRTEngine (main loop)
 
 | Module | Role |
 |--------|------|
-| `wkrt/config.py` | Loads `settings.toml`, merges env-var overrides, resolves relative paths |
+| `wkrt/config.py` | Loads `settings.toml`, merges env-var overrides, resolves relative paths, resolves metadata templates |
 | `wkrt/playlist.py` | Scans `music/<year>/`, reads ID3 tags, weighted-shuffle `PlaylistQueue`, ingest crate |
 | `wkrt/dj.py` | Builds prompts for 7 clip types, calls Claude API, falls back to canned lines |
-| `wkrt/tts.py` | Dispatches to Piper or Google Cloud TTS per DJ config; WAV→MP3; SHA-256 cache |
+| `wkrt/tts.py` | Dispatches to Piper, Google Cloud TTS, or Kokoro per DJ config; WAV→MP3; SHA-256 cache |
 | `wkrt/mixer.py` | ffmpeg filtergraphs: talkover stitch, crossfade, silence trim |
 | `wkrt/engine.py` | Main loop; multi-target streaming; DJ rotation; music ingest; ICY metadata |
 | `wkrt/cache.py` | `StartupCache` (COLD→WARMING→WARM→RUNNING→COOLING) + `TopOfHourScheduler` |
@@ -56,7 +56,7 @@ DJs are defined as `[[djs]]` entries in `settings.toml`. Each entry has:
 
 - `name` — display name (e.g. `"Roxanne"`, `"Neon"`)
 - `shift_hours` — hours per rotation block
-- `tts_backend` — `"piper"` or `"google"`
+- `tts_backend` — `"piper"`, `"google"`, or `"kokoro"`
 - `persona` — multi-line system prompt injected into every Claude call
 - `[djs.clip_types]` — per-DJ clip-type weights
 - `[djs.tts]` — voice model, speed, and other backend-specific params
@@ -92,9 +92,54 @@ whenever `next_track.from_crate` is `True`.
   to 4-second silence if the model file is missing.
 - **`google`** — Google Cloud TTS; requires `GOOGLE_APPLICATION_CREDENTIALS`.
   Uses `en-US-Studio-*` voices. Falls back to silence on auth/network failure.
+- **`kokoro`** — Kokoro ONNX neural TTS (local, no external binary or API key).
+  Requires model files `voices/kokoro-v1.0.onnx` and `voices/kokoro-voices-v1.0.bin`.
+  Download via `INSTALL_KOKORO=1 bash scripts/setup_voices.sh`. ONNX model is
+  cached in memory after first load. Good choice for Raspberry Pi or
+  bandwidth-constrained deployments. Falls back to silence if model files missing.
 
 Cache key is SHA-256 of `"<voice_id>:<text>"`. Two DJs saying the same line
 produce separate cached files.
+
+---
+
+## Metadata Mapping
+
+ICY `StreamTitle` and other metadata sent to Icecast are template-driven.
+Global defaults are defined in `[metadata_mapping]`; per-target overrides
+are set in `[icecast.targets.metadata]`.
+
+**Supported placeholders:**
+- `%T` = Track title
+- `%a` = Artist name
+- `%A` = Album name
+- `%Y` = Release year (from annotation or ID3)
+- `%G` = Genre (from annotation)
+- `%L` = Label (from annotation)
+
+**Example:**
+```toml
+[metadata_mapping]
+StreamTitle = "%a - %T"
+StreamUrl = "https://wkrt.local"
+Comment = "WKRT-FM 104.7"
+
+[[icecast.targets]]
+name = "Primary"
+host = "localhost"
+[icecast.targets.metadata]
+Comment = "WKRT-FM 104.7 Boston"  # override global default
+
+[[icecast.targets]]
+name = "CDN Backup"
+host = "cdn.example.com"
+[icecast.targets.metadata]
+StreamTitle = "[BACKUP] %a - %T"   # prepend tag to title
+```
+
+Metadata resolution is handled by `wkrt/config.py`:
+- `resolve_metadata_template()` replaces placeholders
+- `get_metadata_for_target()` merges global defaults with per-target overrides
 
 ---
 

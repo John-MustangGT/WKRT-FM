@@ -110,6 +110,69 @@ genre = "Classic Rock"
 bitrate = 192
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Metadata mapping — define global placeholders for track metadata.
+# These are used in stream target metadata templates.
+# Supported placeholders:
+#   %T = Track title
+#   %a = Artist name
+#   %A = Album name
+#   %Y = Release year
+#   %G = Genre
+#   %L = Label / record company
+# ─────────────────────────────────────────────────────────────────────────────
+
+[metadata_mapping]
+# Global defaults — can be overridden per-target
+StreamTitle = "%a - %T"
+StreamUrl = "https://wkrt.local"
+Genre = "Classic Rock"
+Comment = "WKRT-FM 104.7 Boston — Classic Rock"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stream targets — Icecast server(s) to broadcast to.
+# Use new [[icecast.targets]] format for multiple servers.
+# Each target inherits metadata_mapping defaults and can override them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Primary Icecast target (legacy config — if using modern [[icecast.targets]], comment this out)
+# To use multiple targets, uncomment the [[icecast.targets]] examples below instead.
+# [icecast]
+# host               = "localhost"
+# port               = 8000
+# mount              = "/wkrt"
+# source_password    = "your-icecast-source-password"
+# codec              = "mp3"                          # mp3, opus, aac
+# bitrate            = 192
+
+# Example: Multiple Icecast targets with metadata overrides
+# [[icecast.targets]]
+# name               = "Primary"
+# host               = "localhost"
+# port               = 8000
+# mount              = "/wkrt"
+# source_password    = "your-icecast-source-password"
+# codec              = "mp3"
+# bitrate            = 192
+#
+# [icecast.targets.metadata]
+# StreamTitle        = "%a - %T"                       # use artist - title (inherit default)
+# StreamUrl          = "https://wkrt.local"            # inherit default
+# Comment            = "WKRT-FM 104.7 Boston"          # override default
+#
+# [[icecast.targets]]
+# name               = "Backup CDN"
+# host               = "cdn.streaming.com"
+# port               = 8000
+# mount              = "/wkrt-backup"
+# source_password    = "your-backup-password"
+# codec              = "opus"                         # use Opus for bandwidth savings
+# bitrate            = 96
+#
+# [icecast.targets.metadata]
+# StreamTitle        = "[CDN] %a - %T"                 # prepend tag
+# Comment            = "WKRT-FM 104.7 — Backup Stream" # custom comment
+
+# ─────────────────────────────────────────────────────────────────────────────
 # DJ roster — add one [[djs]] block per on-air personality.
 # shift_hours controls how many hours of the 24-hour rotation each DJ covers.
 # api_backend defaults to "anthropic" (Claude). Set to "azure_openai" to use

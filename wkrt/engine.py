@@ -1100,16 +1100,23 @@ class WKRTEngine:
 
     # ── ICY metadata ──────────────────────────────────────────────────────────
 
-    def _update_icy_metadata(self, title: str):
+    def _update_icy_metadata(self, track_or_title: Track | str):
         """Fire-and-forget ICY metadata push — never blocks the playback thread."""
         t = threading.Thread(
-            target=self._send_icy_metadata, args=(title,),
+            target=self._send_icy_metadata, args=(track_or_title,),
             daemon=True, name="icy-meta",
         )
         t.start()
 
-    def _send_icy_metadata(self, title: str):
-        """Push a StreamTitle update to all targets that have source credentials."""
+    def _send_icy_metadata(self, track_or_title: Track | str):
+        """Push a StreamTitle update to all targets that have source credentials.
+        
+        Args:
+            track_or_title: Either a Track object (uses metadata templates) or
+                          a string title (legacy, for DJ breaks).
+        """
+        from .config import get_metadata_for_target
+        
         for target in self._targets:
             if not target.get("source_password"):
                 continue
@@ -1117,6 +1124,15 @@ class WKRTEngine:
             port = target.get("port", 8000)
             mount = target.get("mount", "/wkrt")
             password = target["source_password"]
+            
+            # Build StreamTitle from track metadata or use title string directly
+            if isinstance(track_or_title, Track):
+                metadata = get_metadata_for_target(self.cfg, target, track_or_title)
+                title = metadata.get("StreamTitle", f"{track_or_title.artist} - {track_or_title.title}")
+            else:
+                # Legacy: plain string title (for DJ breaks)
+                title = track_or_title
+            
             params = urlencode({"mount": mount, "mode": "updinfo", "song": title})
             url = f"http://{host}:{port}/admin/metadata?{params}"
             creds = base64.b64encode(f"source:{password}".encode()).decode()
@@ -1134,7 +1150,7 @@ class WKRTEngine:
         self._print_now_playing(track)
         self.state.set_now_playing(track, self.next_track)
         self.state.set_cache_state(self.cache.state.name)
-        self._update_icy_metadata(f"{track.artist} - {track.title}")
+        self._update_icy_metadata(track)
         self._discord.notify_track(
             track.artist, track.title,
             year=track.year,

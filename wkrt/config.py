@@ -87,3 +87,65 @@ def validate(cfg: dict) -> None:
     if errors:
         msg = "Configuration validation failed:\n" + "\n".join(f"  • {e}" for e in errors)
         raise ValueError(msg)
+
+
+def resolve_metadata_template(template: str, track: "Track", fallback_empty: str = "") -> str:
+    """Resolve metadata placeholders in a template string.
+    
+    Supported placeholders:
+      %T = track title
+      %a = artist name
+      %A = album name
+      %Y = release year (from annotation or ID3)
+      %G = genre (from annotation or ID3)
+      %L = label (from annotation)
+    
+    Returns the resolved template with placeholders replaced.
+    Missing metadata defaults to empty string unless fallback_empty is set.
+    """
+    from .playlist import Track
+    
+    # Get metadata with fallback to empty string
+    title = track.title or ""
+    artist = track.artist or ""
+    album = getattr(track, "album", None) or ""
+    year = getattr(track, "year", None) or ""
+    genre = getattr(track, "genre", None) or ""
+    label = getattr(track, "label", None) or ""
+    
+    # Replace placeholders
+    result = template
+    result = result.replace("%T", title)
+    result = result.replace("%a", artist)
+    result = result.replace("%A", album)
+    result = result.replace("%Y", str(year))
+    result = result.replace("%G", genre)
+    result = result.replace("%L", label)
+    
+    return result
+
+
+def get_metadata_for_target(cfg: dict, target: dict, track: "Track") -> dict:
+    """Get metadata dict for a stream target, resolving templates and inheriting defaults.
+    
+    Global metadata_mapping is inherited, then per-target metadata overrides it.
+    """
+    from .playlist import Track
+    
+    # Start with global defaults from [metadata_mapping]
+    global_mapping = cfg.get("metadata_mapping", {})
+    metadata = dict(global_mapping)
+    
+    # Override with per-target metadata
+    target_metadata = target.get("metadata", {})
+    metadata.update(target_metadata)
+    
+    # Resolve all templates using the track
+    resolved = {}
+    for key, template in metadata.items():
+        if isinstance(template, str):
+            resolved[key] = resolve_metadata_template(template, track)
+        else:
+            resolved[key] = template
+    
+    return resolved
