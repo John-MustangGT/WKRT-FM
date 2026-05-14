@@ -218,9 +218,9 @@ noise_w     = 0.8
 # Download model files from https://huggingface.co/hexgrad/Kokoro-82M:
 #   kokoro-v0_19.onnx  → voices/kokoro-v0_19.onnx
 #   voices.bin         → voices/kokoro-voices.bin
-# Available voices (kokoro v0.19): af, af_bella, af_nicole, af_sarah, af_sky,
-#                                  am_adam, am_michael, bf_emma, bf_isabella,
-#                                  bm_george, bm_lewis
+# Available voices: run python -c "from kokoro_onnx import Kokoro; k=Kokoro('voices/kokoro-v1.0.onnx','voices/kokoro-voices-v1.0.bin'); print(k.get_voices())"
+# Common voices: af_heart, af_bella, af_nicole, af_sarah, af_sky,
+#                am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis
 #
 # [[djs]]
 # name        = "Echo"
@@ -239,9 +239,9 @@ noise_w     = 0.8
 # station_id     = 0.10
 #
 # [djs.tts]
-# kokoro_voice  = "af_bella"           # voice name from Kokoro
-# kokoro_model  = "kokoro-v0_19.onnx"  # relative to voices_dir
-# kokoro_voices = "kokoro-voices.bin"  # relative to voices_dir
+# kokoro_voice  = "af_heart"              # voice name from Kokoro
+# kokoro_model  = "kokoro-v1.0.onnx"     # relative to voices_dir (or .int8 for Pi)
+# kokoro_voices = "kokoro-voices-v1.0.bin"  # relative to voices_dir
 # speed         = 1.0                  # speaking rate (0.5–2.0)
 # lang          = "en-us"              # language code
 
