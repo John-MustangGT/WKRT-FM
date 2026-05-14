@@ -66,11 +66,14 @@ echo ""
 # ── Kokoro ONNX model files (optional) ──────────────────────────────────────
 # Only needed if any DJ uses tts_backend = "kokoro" in settings.toml.
 # Install the Python packages first:  pip install kokoro-onnx soundfile
-KOKORO_MODEL="${VOICES_DIR}/kokoro-v0_19.onnx"
-KOKORO_VOICES="${VOICES_DIR}/kokoro-voices.bin"
+KOKORO_MODEL="${VOICES_DIR}/kokoro-v1.0.onnx"
+KOKORO_VOICES="${VOICES_DIR}/kokoro-voices-v1.0.bin"
 # Model files are hosted on the kokoro-onnx GitHub releases (not HuggingFace,
 # which serves git-lfs pointer files instead of the real binaries via curl).
 KOKORO_BASE="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+# For Raspberry Pi, use the int8 quantized model (88 MB vs 310 MB, much faster):
+#   KOKORO_MODEL_FILE="kokoro-v1.0.int8.onnx"
+KOKORO_MODEL_FILE="${KOKORO_MODEL_FILE:-kokoro-v1.0.onnx}"
 
 _kokoro_download() {
     local url="$1" dest="$2" min_bytes="$3" label="$4"
@@ -87,14 +90,14 @@ _kokoro_download() {
 }
 
 if [[ "${INSTALL_KOKORO:-}" == "1" ]]; then
-    echo "==> Downloading Kokoro ONNX model files..."
+    echo "==> Downloading Kokoro ONNX model files (v1.0)..."
     if [[ ! -f "$KOKORO_MODEL" ]]; then
-        _kokoro_download "${KOKORO_BASE}/kokoro-v0_19.onnx" "$KOKORO_MODEL" 50000000 "kokoro model"
+        _kokoro_download "${KOKORO_BASE}/${KOKORO_MODEL_FILE}" "$KOKORO_MODEL" 50000000 "kokoro model"
     else
         echo "==> Kokoro model already present: $KOKORO_MODEL"
     fi
     if [[ ! -f "$KOKORO_VOICES" ]]; then
-        _kokoro_download "${KOKORO_BASE}/voices.bin" "$KOKORO_VOICES" 1000000 "kokoro voices"
+        _kokoro_download "${KOKORO_BASE}/voices-v1.0.bin" "$KOKORO_VOICES" 1000000 "kokoro voices"
     else
         echo "==> Kokoro voices already present: $KOKORO_VOICES"
     fi
