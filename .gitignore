@@ -8,8 +8,7 @@ __pycache__/
 dj_clips/
 spool/
 logs/
-voices/*.onnx
-voices/*.onnx.json
+voices/
 music/
 new_music/*
 !new_music/.gitkeep
