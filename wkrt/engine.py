@@ -517,6 +517,17 @@ class WKRTEngine:
         else:
             audio_args = ["-c:a", "copy", "-f", "mp3"]
 
+        extra_audio_args = target.get("ffmpeg_audio_args", [])
+        if isinstance(extra_audio_args, tuple):
+            extra_audio_args = list(extra_audio_args)
+        if not isinstance(extra_audio_args, list):
+            log.warning(
+                "Stream target '%s' has invalid ffmpeg_audio_args (expected list); ignoring",
+                target.get("name", target.get("host", "unknown")),
+            )
+            extra_audio_args = []
+        extra_audio_args = [str(x) for x in extra_audio_args]
+
         ice_name = target.get(
             "ice_name",
             f"{station['call_sign']}-FM {station['frequency']}",
@@ -525,6 +536,7 @@ class WKRTEngine:
             "ffmpeg", "-loglevel", "warning",
             "-re", "-f", "mp3", "-i", "pipe:0",
             *audio_args,
+            *extra_audio_args,
             "-ice_name", ice_name,
             "-ice_description", station.get("tagline", ""),
             "-ice_genre", "Classic Rock",

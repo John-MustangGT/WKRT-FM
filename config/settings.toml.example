@@ -14,7 +14,7 @@ log_dir = "./logs"
 
 [logging]
 # Write logs to files under log_dir in addition to stdout/journald.
-# Disabled by default — journald already captures all output when running
+# Disabled by default journald already captures all output when running
 # under systemd, so file logs are redundant in production.
 file_logging = false
 # Days of rolled log files to keep (only relevant when file_logging = true).
@@ -28,7 +28,7 @@ lookahead = 3
 # Insert DJ clip every N tracks (0 = never, 1 = every track)
 dj_every_n_tracks = 3
 # How many recently played tracks to exclude from the candidate pool
-# recent_exclude = 10
+#recent_exclude = 10
 # Crossfade duration in seconds
 crossfade_seconds = 3
 # Fade out duration at end of track before DJ clip
@@ -39,7 +39,7 @@ dj_talkover_seconds = 8
 # Seconds of silence to trim from start/end of tracks
 trim_silence = true
 
-# Year weights — higher = played more often
+# Year weights higher = played more often
 # Default is equal weight across all years
 [playlist.year_weights]
 1980 = 1.0
@@ -60,7 +60,7 @@ You are Roxanne, the afternoon drive DJ on WKRT 104.7, Boston's home of classic 
 Your style: warm, slightly husky voice, dry wit, encyclopedic rock knowledge.
 You love the 80s but aren't cheesy about it. You drop real facts and trivia.
 You occasionally reference Boston, the weather, or the commute.
-Keep it authentic — like a real radio DJ, not a parody of one.
+Keep it authentic like a real radio DJ, not a parody of one.
 Never use phrases like 'totally', 'awesome', or 'rock on'.
 """
 
@@ -81,7 +81,7 @@ noise_scale = 0.667
 noise_w = 0.8
 
 [api]
-# Anthropic API key — can also set ANTHROPIC_API_KEY env var
+# Anthropic API key can also set ANTHROPIC_API_KEY env var
 api_key = "your-anthropic-api-key-here"
 model = "claude-haiku-4-5-20251001"
 max_tokens = 300
@@ -109,8 +109,8 @@ description = "The Home of Classic Rock"
 genre = "Classic Rock"
 bitrate = 192
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Metadata mapping — define global placeholders for track metadata.
+#
+# Metadata mapping define global placeholders for track metadata.
 # These are used in stream target metadata templates.
 # Supported placeholders:
 #   %T = Track title
@@ -119,22 +119,22 @@ bitrate = 192
 #   %Y = Release year
 #   %G = Genre
 #   %L = Label / record company
-# ─────────────────────────────────────────────────────────────────────────────
+#
 
 [metadata_mapping]
-# Global defaults — can be overridden per-target
+# Global defaults can be overridden per-target
 StreamTitle = "%a - %T"
 StreamUrl = "https://wkrt.local"
 Genre = "Classic Rock"
-Comment = "WKRT-FM 104.7 Boston — Classic Rock"
+Comment = "WKRT-FM 104.7 Boston Classic Rock"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Stream targets — Icecast server(s) to broadcast to.
+#
+# Stream targets Icecast server(s) to broadcast to.
 # Use new [[icecast.targets]] format for multiple servers.
 # Each target inherits metadata_mapping defaults and can override them.
-# ─────────────────────────────────────────────────────────────────────────────
+#
 
-# Primary Icecast target (legacy config — if using modern [[icecast.targets]], comment this out)
+# Primary Icecast target (legacy config if using modern [[icecast.targets]], comment this out)
 # To use multiple targets, uncomment the [[icecast.targets]] examples below instead.
 # [icecast]
 # host               = "localhost"
@@ -143,6 +143,7 @@ Comment = "WKRT-FM 104.7 Boston — Classic Rock"
 # source_password    = "your-icecast-source-password"
 # codec              = "mp3"                          # mp3, opus, aac
 # bitrate            = 192
+# ffmpeg_audio_args  = []                             # optional extra ffmpeg args (audio output)
 
 # Example: Multiple Icecast targets with metadata overrides
 # [[icecast.targets]]
@@ -167,29 +168,30 @@ Comment = "WKRT-FM 104.7 Boston — Classic Rock"
 # source_password    = "your-backup-password"
 # codec              = "opus"                         # use Opus for bandwidth savings
 # bitrate            = 96
+# ffmpeg_audio_args  = ["-vbr", "on"]                # e.g. Opus VBR
 #
 # [icecast.targets.metadata]
 # StreamTitle        = "[CDN] %a - %T"                 # prepend tag
-# Comment            = "WKRT-FM 104.7 — Backup Stream" # custom comment
+# Comment            = "WKRT-FM 104.7 Backup Stream" # custom comment
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DJ roster — add one [[djs]] block per on-air personality.
+#
+# DJ roster add one [[djs]] block per on-air personality.
 # shift_hours controls how many hours of the 24-hour rotation each DJ covers.
 # api_backend defaults to "anthropic" (Claude). Set to "azure_openai" to use
-# Azure OpenAI (GPT-4o, etc.) instead — great for a Copilot-powered DJ.
-# ─────────────────────────────────────────────────────────────────────────────
+# Azure OpenAI (GPT-4o, etc.) instead great for a Copilot-powered DJ.
+#
 
-# ── Anthropic / Claude DJ (default) ──────────────────────────────────────────
+# Anthropic / Claude DJ (defaut)
 [[djs]]
 name        = "Roxanne"
 shift_hours = 12
 tts_backend = "piper"
-# api_backend defaults to "anthropic" — uses the global [api] key + model
+# api_backend defaults to "anthropic" uses the global [api] key + model
 persona = """
 You are Roxanne, the afternoon drive DJ on WKRT 104.7, Boston's home of classic rock.
 Your style: warm, slightly husky voice, dry wit, encyclopedic rock knowledge.
 You love the 80s but aren't cheesy about it. You drop real facts and trivia.
-Keep it authentic — like a real radio DJ, not a parody of one.
+Keep it authentic like a real radio DJ, not a parody of one.
 """
 
 [djs.clip_types]
@@ -208,19 +210,19 @@ noise_w     = 0.8
 # Use phonetic spellings that espeak-ng renders the way you want.
 # pronounce = { "Scorpions" = "Score-pee-ons", "Foreigner" = "For-ner" }
 
-# ── Azure OpenAI DJ (Copilot-powered) ────────────────────────────────────────
+# Azure OpenAI DJ (Copilot-powered)
 # Requires:  pip install openai
 # Azure credentials can also be set via env vars:
-#   AZURE_OPENAI_ENDPOINT   → overrides azure.endpoint
-#   AZURE_OPENAI_API_KEY    → overrides azure.api_key
-# Get these from your Azure OpenAI resource → Keys and Endpoint in the portal.
+#   AZURE_OPENAI_ENDPOINT   overrides azure.endpoint
+#   AZURE_OPENAI_API_KEY    overrides azure.api_key
+# Get these from your Azure OpenAI resource Keys and Endpoint in the portal.
 # The deployment name must match one you've created in Azure AI Studio.
 #
 # [[djs]]
 # name        = "Neon"
 # shift_hours = 12
-# tts_backend = "google"             # or "piper" — independent of api_backend
-# api_backend = "azure_openai"       # <── this is the key line
+# tts_backend = "google"             # or "piper" independent of api_backend
+# api_backend = "azure_openai"       # this is the key line
 # persona = """
 # You are Neon, the overnight DJ on WKRT 104.7. You're cool, a little mysterious,
 # with an encyclopedic knowledge of synth-pop and hard rock deep cuts.
@@ -237,18 +239,18 @@ noise_w     = 0.8
 # google_voice   = "en-US-Studio-M"
 # speaking_rate  = 1.0
 
-# ── Example: Overnight DJ running on local Ollama (no API key required) ───────
+# Example: Overnight DJ running on local Ollama (no API key required)
 # A spare, no-frills voice that holds down the late shift while the main DJs rest.
-# Runs entirely on-device — good for Pi/LXC deployments with Ollama installed.
+# Runs entirely on-device good for Pi/LXC deployments with Ollama installed.
 #
 # [[djs]]
 # name        = "Static"
-# shift_hours = 8                    # e.g. 22:00–06:00
+# shift_hours = 8                    # e.g. 22:00 ~ 06:00
 # tts_backend = "piper"
 # api_backend = "ollama"
 # persona = """
 # You are Static, the overnight automation DJ on WKRT 104.7.
-# You are sparse and unfussy — a steady hand through the small hours.
+# You are sparse and unfussy a steady hand through the small hours.
 # No jokes. No hype. Just the facts: artist, song, year, call sign.
 # One or two sentences max. Keep the city company without waking it up.
 # """
@@ -257,7 +259,7 @@ noise_w     = 0.8
 # between_tracks = 0.50
 # trivia         = 0.15
 # dedication     = 0.05
-# station_id     = 0.30             # lean on station IDs — reliable without a good model
+# station_id     = 0.30             # lean on station IDs reliable without a good model
 #
 # [djs.tts]
 # voice_model = "en_US-lessac-high"
@@ -267,20 +269,20 @@ noise_w     = 0.8
 # host       = "localhost"          # Ollama host (or LAN IP)
 # port       = 11434
 # model      = "llama3"             # any model pulled via `ollama pull <model>`
-# max_tokens = 120                  # keep it short — this DJ doesn't ramble
+# max_tokens = 120                  # keep it short this DJ doesn't ramble
 #
 # [djs.azure]
 # endpoint    = "https://YOUR-RESOURCE-NAME.openai.azure.com/"
 # api_key     = "your-azure-openai-api-key"
 # deployment  = "gpt-4o"             # name of your deployment in Azure AI Studio
 # api_version = "2024-02-01"         # Azure OpenAI API version
-# max_tokens  = 300                  # optional — overrides global [api].max_tokens
+# max_tokens  = 300                  # optional overrides global [api].max_tokens
 
-# ── Kokoro ONNX DJ (local neural TTS, no cloud or binary required) ────────────
+# Kokoro ONNX DJ (local neural TTS, no cloud or binary require
 # Requires:  pip install kokoro-onnx soundfile
 # Download model files from https://huggingface.co/hexgrad/Kokoro-82M:
-#   kokoro-v0_19.onnx  → voices/kokoro-v0_19.onnx
-#   voices.bin         → voices/kokoro-voices.bin
+#   kokoro-v0_19.onnx  voices/kokoro-v0_19.onnx
+#   voices.bin         voices/kokoro-voices.bin
 # Available voices: run python -c "from kokoro_onnx import Kokoro; k=Kokoro('voices/kokoro-v1.0.onnx','voices/kokoro-voices-v1.0.bin'); print(k.get_voices())"
 # Common voices: af_heart, af_bella, af_nicole, af_sarah, af_sky,
 #                am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis
@@ -292,7 +294,7 @@ noise_w     = 0.8
 # persona = """
 # You are Echo, the midday DJ on WKRT 104.7.
 # You're energetic, warm, and love classic rock deep cuts.
-# Keep it real — one or two sentences, no filler.
+# Keep it real one or two sentences, no filler.
 # """
 #
 # [djs.clip_types]
@@ -305,12 +307,12 @@ noise_w     = 0.8
 # kokoro_voice  = "af_heart"              # voice name from Kokoro
 # kokoro_model  = "kokoro-v1.0.onnx"     # relative to voices_dir (or .int8 for Pi)
 # kokoro_voices = "kokoro-voices-v1.0.bin"  # relative to voices_dir
-# speed         = 1.0                  # speaking rate (0.5–2.0)
+# speed         = 1.0                  # speaking rate (0.5 ~ 2.0)
 # lang          = "en-us"              # language code
 
-# ── Discord webhook (optional) ────────────────────────────────────────────────
+# Discord webhook (optional)
 # Post now-playing embeds to a Discord channel.
-# 1. In Discord: Edit Channel → Integrations → Webhooks → New Webhook → Copy URL
+# 1. In Discord: Edit Channel Integrations Webhooks New Webhook Copy URL
 # 2. Paste the URL below and uncomment.
 #
 # [discord]
