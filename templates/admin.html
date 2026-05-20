@@ -426,6 +426,17 @@
   .track-link { cursor: pointer; text-decoration: none; }
   .track-link:hover { color: var(--accent2); }
   .no-hist { color: var(--dim); font-style: italic; font-size: 0.82rem; }
+  .meta-edit-label {
+    display: block; font-size: 0.68rem; color: var(--dim);
+    margin: 8px 0 3px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .meta-edit-label:first-child { margin-top: 0; }
+  .meta-edit-field {
+    background: #1a1a1a; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font-size: 0.82rem; padding: 5px 8px;
+    width: 100%; box-sizing: border-box; font-family: inherit;
+  }
+  .meta-edit-field:focus { outline: none; border-color: var(--accent); }
 </style>
 </head>
 <body>
@@ -591,6 +602,7 @@
   let allArtists = [];       // [{name, tracks:[{artist,title,year}]}]
   let selectedArtist = null;
   let statusData = {};
+  let _panelTrack = null;   // currently open track in detail panel
 
   // ── Toast ─────────────────────────────────────────────────────────────────
   let toastTimer;
@@ -1162,6 +1174,7 @@
   }
 
   function renderTrackDetail(d) {
+    _panelTrack = d;
     const ann  = d.annotation  || {};
     const id3  = d.id3         || {};
     const hist = d.history     || { total_plays: 0, djs: {} };
@@ -1250,7 +1263,88 @@
       <div class="panel-sec">
         <div class="panel-sec-label">Play History</div>
         ${histInner}
+      </div>
+      <div class="panel-sec">
+        <div class="panel-sec-label" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Metadata Override</span>
+          <button class="dj-btn" style="font-size:.65rem;padding:2px 10px;height:auto" onclick="showMetadataEdit()">✏ Edit</button>
+        </div>
+        <div style="font-size:.73rem;color:var(--dim);line-height:1.5">
+          Correct album, label, year, or genre when MusicBrainz matched incorrectly.
+          ${ann.manually_edited ? '<br><span style="color:var(--accent2)">✓ Manually edited</span>' : ''}
+        </div>
       </div>`;
+  }
+
+  // ── Metadata editor ───────────────────────────────────────────────────────
+  function showMetadataEdit() {
+    const d   = _panelTrack;
+    const ann = d.annotation || {};
+    document.getElementById('track-panel-body').innerHTML = `
+      <div class="panel-title-block">
+        <div class="panel-track-name">${esc(d.title)}</div>
+        <div class="panel-track-sub">${esc(d.artist)}</div>
+      </div>
+      <div class="panel-sec">
+        <div class="panel-sec-label">Edit Metadata</div>
+        <label class="meta-edit-label">Album</label>
+        <input class="meta-edit-field" id="me-album" value="${esc(ann.album || '')}">
+        <label class="meta-edit-label">Label</label>
+        <input class="meta-edit-field" id="me-label" value="${esc(ann.label || '')}">
+        <label class="meta-edit-label">Release Year</label>
+        <input class="meta-edit-field" id="me-year" value="${esc(ann.release_year || '')}" maxlength="4" style="width:90px">
+        <label class="meta-edit-label">Genre Tags (comma-separated)</label>
+        <input class="meta-edit-field" id="me-tags" value="${esc((ann.tags || []).join(', '))}">
+        <label class="meta-edit-label">MusicBrainz Recording ID</label>
+        <input class="meta-edit-field" id="me-mbid" value="${esc(ann.mbid || '')}" placeholder="optional — used for cover art lookup">
+        <div style="display:flex;gap:8px;margin-top:14px">
+          <button class="dj-btn" style="color:var(--accent);border-color:var(--accent)" onclick="saveMetadata()">Save</button>
+          <button class="dj-btn" onclick="loadTrackDetail(_panelTrack.artist, _panelTrack.title, _panelTrack.year)">Cancel</button>
+        </div>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:.72rem;color:var(--dim);margin-bottom:8px">
+            Delete the cached annotation so MusicBrainz is re-queried on next startup.
+          </div>
+          <button class="dj-btn" style="color:var(--red);border-color:var(--red)" onclick="resetAnnotation()">
+            ↺ Clear &amp; Re-fetch from MusicBrainz
+          </button>
+        </div>
+      </div>`;
+  }
+
+  async function saveMetadata() {
+    const d    = _panelTrack;
+    const ann  = d.annotation || {};
+    const tags = document.getElementById('me-tags').value
+      .split(',').map(t => t.trim()).filter(Boolean);
+    try {
+      await api('POST', '/api/track/annotation', {
+        artist:       d.artist,
+        title:        d.title,
+        album:        document.getElementById('me-album').value.trim() || null,
+        label:        document.getElementById('me-label').value.trim() || null,
+        release_year: document.getElementById('me-year').value.trim() || null,
+        tags,
+        mbid:         document.getElementById('me-mbid').value.trim() || ann.mbid || null,
+        release_mbid: ann.release_mbid || null,
+      });
+      toast('Metadata saved', 'ok');
+      loadTrackDetail(d.artist, d.title, d.year);
+    } catch(e) {
+      toast('Save failed: ' + e.message, 'err');
+    }
+  }
+
+  async function resetAnnotation() {
+    if (!confirm('Delete the cached annotation? MusicBrainz will be re-queried on next startup.')) return;
+    const d = _panelTrack;
+    try {
+      await api('POST', '/api/track/annotation/reset', { artist: d.artist, title: d.title });
+      toast('Annotation cleared', 'ok');
+      loadTrackDetail(d.artist, d.title, d.year);
+    } catch(e) {
+      toast('Reset failed: ' + e.message, 'err');
+    }
   }
 
   // ── DJ Stats ──────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ Workflow:
 import base64
 import datetime
 import json
+import re
 import logging
 import logging.handlers
 import os
@@ -203,8 +204,9 @@ class WKRTEngine:
             return
 
         self._library = library
-        year_weights = self.cfg["playlist"].get("year_weights", {})
-        queue = PlaylistQueue(library, year_weights)
+        year_weights   = self.cfg["playlist"].get("year_weights", {})
+        recent_exclude = self.cfg.get("playlist", {}).get("recent_exclude", 0)
+        queue = PlaylistQueue(library, year_weights, history_limit=recent_exclude)
         self._queue = queue
         self.state.set_dj_names([d["name"] for d in self._dj_configs])
 
@@ -685,12 +687,24 @@ class WKRTEngine:
         if self._queue and self._queue.crate_size > 0:
             return next(self._queue)
 
+        # Build the recency exclusion set once, outside the lock
+        recent_keys = {
+            (r["artist"].lower(), r["title"].lower())
+            for r in self.state.recent_tracks
+        }
+
         track = None
         remaining = 0
         with self._block_lock:
-            if self._programmed_block:
-                track     = self._programmed_block.pop(0)
+            # Skip any block entries that were already played since the block was generated
+            while self._programmed_block:
+                candidate = self._programmed_block.pop(0)
                 remaining = len(self._programmed_block)
+                key = (candidate.artist.lower(), candidate.title.lower())
+                if key not in recent_keys:
+                    track = candidate
+                    break
+                log.debug(f"Skipping recently-played block track: {candidate.display}")
 
         if track is not None:
             if remaining <= 2 and not self._refilling.is_set():
@@ -1045,7 +1059,7 @@ class WKRTEngine:
                 )
         return [
             {"name": a, "tracks": sorted(tl, key=lambda x: x["title"])}
-            for a, tl in sorted(artists.items(), key=lambda x: x[0].lower())
+            for a, tl in sorted(artists.items(), key=lambda x: re.sub(r'^the\s+', '', x[0].lower()))
         ]
 
     @property

@@ -121,11 +121,14 @@ class PlaylistQueue:
     special DJ announcement.
     """
 
-    def __init__(self, library: dict[int, list[Track]], year_weights: dict[str, float]):
+    def __init__(self, library: dict[int, list[Track]], year_weights: dict[str, float],
+                 history_limit: int = 0):
         self.library = library
         self.year_weights = {int(k): v for k, v in year_weights.items()}
         self._recent: list[Path] = []
-        self._history_limit = max(10, sum(len(v) for v in library.values()) // 4)
+        lib_size = sum(len(v) for v in library.values())
+        # Use the configured limit when supplied; fall back to library_size // 4
+        self._history_limit = max(10, history_limit if history_limit > 0 else lib_size // 4)
         self._queue: list[Track] = []
         self._crate: list[Track] = []   # new arrivals — played before regular shuffle
         self._refill()

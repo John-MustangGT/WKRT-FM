@@ -28,6 +28,8 @@ Routes:
   GET  /api/queue              → projected play queue (now + upcoming)  [auth required]
   GET  /api/dj-stats           → per-DJ API call/token/latency stats  [public]
   POST /api/dj-stats/reset     → clear all accumulated stats  [auth required]
+  POST /api/track/annotation   → save manual metadata override  [auth required]
+  POST /api/track/annotation/reset → clear annotation cache for re-fetch  [auth required]
   GET  /metrics                → Prometheus text exposition format  [public]
 """
 import base64
@@ -324,6 +326,28 @@ class _Handler(BaseHTTPRequestHandler):
             if not self.engine:
                 return self._respond(503, "text/plain", b"Engine not available")
             self.engine.reset_dj_stats()
+            self._respond(200, "application/json", b'{"ok":true}')
+
+        elif self.path == "/api/track/annotation":
+            try:
+                req    = json.loads(body)
+                artist = str(req["artist"])
+                title  = str(req["title"])
+            except (ValueError, KeyError, TypeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need artist, title")
+            if self.engine:
+                self.engine._annotator.save_override(artist, title, req)
+            self._respond(200, "application/json", b'{"ok":true}')
+
+        elif self.path == "/api/track/annotation/reset":
+            try:
+                req    = json.loads(body)
+                artist = str(req["artist"])
+                title  = str(req["title"])
+            except (ValueError, KeyError, TypeError):
+                return self._respond(400, "text/plain", b"Invalid JSON - need artist, title")
+            if self.engine:
+                self.engine._annotator.delete(artist, title)
             self._respond(200, "application/json", b'{"ok":true}')
 
         else:

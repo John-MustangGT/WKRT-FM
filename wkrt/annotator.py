@@ -148,6 +148,34 @@ class Annotator:
                 ok += 1
         log.info(f"Annotation sweep complete: {ok}/{len(missing)} matched on MusicBrainz")
 
+    def save_override(self, artist: str, title: str, data: dict):
+        """Write a manually-edited annotation; prevents automatic re-fetch."""
+        now = datetime.now(timezone.utc).isoformat()
+        tags = [t.strip() for t in data.get("tags", []) if str(t).strip()]
+        entry: dict = {
+            "found": True,
+            "artist": data.get("artist") or artist,
+            "title":  data.get("title")  or title,
+            "album":  data.get("album")  or None,
+            "label":  data.get("label")  or None,
+            "release_year": data.get("release_year") or None,
+            "tags":   tags,
+            "manually_edited": True,
+            "fetched_at": now,
+        }
+        for k in ("mbid", "release_mbid"):
+            if data.get(k):
+                entry[k] = data[k]
+        self._save(artist, title, entry)
+        log.info(f"Annotation manually edited: {artist} — {title}")
+
+    def delete(self, artist: str, title: str):
+        """Delete cached annotation so it will be re-fetched on next call."""
+        path = self._cache_path(artist, title)
+        if path.exists():
+            path.unlink()
+            log.info(f"Annotation cache cleared: {artist} — {title}")
+
     @staticmethod
     def format_for_prompt(annotation: Optional[dict], label: str) -> list[str]:
         """Return a list of fact lines suitable for injecting into a DJ prompt."""
