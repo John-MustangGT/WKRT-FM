@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.backends.legacy:build"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [project]
 name = "wkrt-fm"
-version = "0.1.0"
+dynamic = ["version"]
 description = "WKRT-FM 104.7 — AI-powered retro 80s internet radio engine"
 readme = "README.md"
 requires-python = ">=3.11"
-# System dependencies (not managed by pip):
+# System dependencies (not managed by uv/pip):
 #   ffmpeg, ffprobe, ffplay  — audio processing and playback
 #   piper / piper-tts        — local TTS binary (Piper backend)
 #   icecast2                 — optional, for network streaming
@@ -22,18 +22,36 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
-[project.scripts]
-wkrt = "wkrt.engine:main"
-
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "pytest-asyncio",
+# pip install wkrt-fm[kokoro]  — on-device neural TTS (no cloud account needed)
+kokoro = [
+    "kokoro-onnx>=0.4.0",
+    "soundfile>=0.12.0",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["wkrt*"]
+[project.scripts]
+wkrt-fm = "wkrt.cli:main"
 
+# ── Version from git tags ──────────────────────────────────────────────────
+# Tag a release:  git tag v1.2.3 && git push --tags
+# Between tags the version reads e.g. 1.2.3.dev4+gabcdef
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+# Written at `uv build` time; committed copy lives in wkrt/_version.py
+version-file = "wkrt/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wkrt"]
+
+# ── Dev dependencies ───────────────────────────────────────────────────────
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+# ── Test config ────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 testpaths = ["tests"]

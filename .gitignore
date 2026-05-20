@@ -5,6 +5,7 @@ config/google-creds.json
 __pycache__/
 *.pyc
 *.pyo
+.venv/
 dj_clips/
 spool/
 logs/
