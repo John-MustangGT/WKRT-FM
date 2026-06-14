@@ -24,7 +24,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -485,6 +485,18 @@ class WKRTEngine:
         return []
 
     def _target_url(self, target: dict) -> str:
+        """Return the ffmpeg output URL for a target."""
+        explicit_url = str(target.get("url", "")).strip()
+        if explicit_url:
+            return explicit_url
+
+        protocol = str(target.get("protocol", "")).strip().lower()
+        if protocol == "rtsp":
+            host = target.get("host", "localhost")
+            port = target.get("port", 8554)
+            mount = target.get("mount", "/radio")
+            return f"rtsp://{host}:{port}{mount}"
+
         password = target.get("source_password", "")
         if not password:
             log.warning(
@@ -497,27 +509,77 @@ class WKRTEngine:
             f"{target.get('mount', '/wkrt')}"
         )
 
+    def _target_public_url(self, target: dict) -> str:
+        """Return the URL listeners should use for a target."""
+        explicit_url = str(target.get("url", "")).strip()
+        if explicit_url:
+            scheme = urlparse(explicit_url).scheme.lower()
+            if scheme and scheme != "icecast":
+                return explicit_url
+
+        host = target.get("host", "localhost")
+        port = target.get("port", 8000)
+        mount = target.get("mount", "/wkrt")
+        return f"http://{host}:{port}{mount}"
+
+    def _target_output_format(self, target: dict, codec: str) -> str:
+        """Return the ffmpeg muxer format for a target."""
+        explicit_format = str(target.get("format", "")).strip().lower()
+        if explicit_format:
+            return explicit_format
+
+        scheme = urlparse(str(target.get("url", "")).strip()).scheme.lower()
+        if scheme == "rtsp":
+            return "rtsp"
+        if codec == "opus":
+            return "ogg"
+        if codec == "aac":
+            return "adts"
+        return "mp3"
+
+    def _is_icecast_target(self, target: dict) -> bool:
+        """Return True when a target uses Icecast-specific metadata options."""
+        protocol = str(target.get("protocol", "")).strip().lower()
+        if protocol:
+            return protocol == "icecast"
+
+        explicit_url = str(target.get("url", "")).strip()
+        if explicit_url:
+            scheme = urlparse(explicit_url).scheme.lower()
+            if scheme:
+                return scheme in {"icecast", "http", "https"}
+
+        return True
+
     def _start_stream(self, target: dict) -> Optional[subprocess.Popen]:
         """Start one persistent ffmpeg process for the given target."""
         url = self._target_url(target)
         station = self.cfg["station"]
         codec = target.get("codec", "mp3").lower()
         bitrate = target.get("bitrate")
+        output_format = self._target_output_format(target, codec)
+        is_icecast = self._is_icecast_target(target)
 
         if codec == "opus":
             audio_args = [
                 "-c:a", "libopus", "-b:a", f"{bitrate or 96}k",
-                "-f", "ogg", "-content_type", "audio/ogg",
+                "-f", output_format,
             ]
+            if is_icecast and output_format == "ogg":
+                audio_args += ["-content_type", "audio/ogg"]
         elif codec == "aac":
             audio_args = [
                 "-c:a", "aac", "-b:a", f"{bitrate or 96}k",
-                "-f", "adts", "-content_type", "audio/aac",
+                "-f", output_format,
             ]
+            if is_icecast and output_format in {"adts", "aac"}:
+                audio_args += ["-content_type", "audio/aac"]
         elif bitrate:
-            audio_args = ["-c:a", "libmp3lame", "-b:a", f"{bitrate}k", "-f", "mp3"]
+            audio_args = [
+                "-c:a", "libmp3lame", "-b:a", f"{bitrate}k", "-f", output_format,
+            ]
         else:
-            audio_args = ["-c:a", "copy", "-f", "mp3"]
+            audio_args = ["-c:a", "copy", "-f", output_format]
 
         extra_audio_args = target.get("ffmpeg_audio_args", [])
         if isinstance(extra_audio_args, tuple):
@@ -539,11 +601,14 @@ class WKRTEngine:
             "-re", "-f", "mp3", "-i", "pipe:0",
             *audio_args,
             *extra_audio_args,
-            "-ice_name", ice_name,
-            "-ice_description", station.get("tagline", ""),
-            "-ice_genre", "Classic Rock",
-            url,
         ]
+        if is_icecast:
+            cmd.extend([
+                "-ice_name", ice_name,
+                "-ice_description", station.get("tagline", ""),
+                "-ice_genre", "Classic Rock",
+            ])
+        cmd.append(url)
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -641,6 +706,7 @@ class WKRTEngine:
                 "host": target.get("host", ""),
                 "port": target.get("port", 8000),
                 "mount": target.get("mount", "/wkrt"),
+                "url": self._target_public_url(target),
                 "codec": target.get("codec", "mp3"),
                 "bitrate": target.get("bitrate"),
                 "enabled": self._target_enabled[i],

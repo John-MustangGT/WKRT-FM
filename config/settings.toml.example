@@ -174,6 +174,15 @@ Comment = "WKRT-FM 104.7 Boston Classic Rock"
 # StreamTitle        = "[CDN] %a - %T"                 # prepend tag
 # Comment            = "WKRT-FM 104.7 Backup Stream" # custom comment
 
+# Example: MediaMTX / RTSP target alongside Icecast
+# [[icecast.targets]]
+# name               = "MediaMTX"
+# url                = "rtsp://localhost:8554/radio"
+# codec              = "opus"
+# bitrate            = 128
+# format             = "rtsp"
+# ffmpeg_audio_args  = ["-rtsp_transport", "udp"]
+
 #
 # DJ roster add one [[djs]] block per on-air personality.
 # shift_hours controls how many hours of the 24-hour rotation each DJ covers.

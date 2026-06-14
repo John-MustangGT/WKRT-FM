@@ -184,8 +184,8 @@ class _Handler(BaseHTTPRequestHandler):
                             "host":   t["host"],
                             "port":   t["port"],
                             "mount":  t["mount"],
+                            "url":    t.get("url"),
                             "codec":  t["codec"],
-                            "url":    f"http://{t['host']}:{t['port']}{t['mount']}",
                         })
             self._respond(200, "application/json", json.dumps(streams).encode())
 

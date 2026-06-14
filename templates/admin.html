@@ -1107,7 +1107,7 @@
             <th>Name</th><th>Address</th><th>Codec / Bitrate</th><th>Status</th><th>Actions</th>
           </tr></thead>
           <tbody>${targets.map(t => {
-            const addr = `${esc(t.host)}:${t.port}${esc(t.mount)}`;
+            const addr = t.url ? esc(t.url) : `${esc(t.host)}:${t.port}${esc(t.mount)}`;
             const codec = t.codec === 'opus'
               ? `Opus ${t.bitrate || 96}k`
               : t.bitrate ? `MP3 ${t.bitrate}k` : 'MP3 (copy)';

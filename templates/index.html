@@ -578,21 +578,26 @@
 
     // Resolve URLs substituting localhost with browser hostname for external listeners
     const resolved = streams.map(s => {
+      if (s.url) {
+        return { ...s, resolvedUrl: s.url };
+      }
       const host = (s.host === 'localhost' || s.host === '127.0.0.1')
         ? window.location.hostname : s.host;
       return { ...s, resolvedUrl: `http://${host}:${s.port}${s.mount}` };
     });
 
+    const playable = resolved.filter(s => /^https?:/i.test(s.resolvedUrl));
+
     // Populate the player stream selector
     const sel = document.getElementById('stream-select');
-    sel.innerHTML = resolved.map(s =>
+    sel.innerHTML = playable.map(s =>
       `<option value="${esc(s.resolvedUrl)}">${esc(s.name)} (${esc(s.codec || 'mp3')})</option>`
     ).join('');
-    if (resolved.length > 1) {
+    if (playable.length > 1) {
       sel.style.display = 'inline-block';
     }
     // Default player to first MP3 stream (Safari can't decode Opus/OGG); fall back to first
-    const preferred = resolved.find(s => (s.codec || 'mp3') === 'mp3') || resolved[0];
+    const preferred = playable.find(s => (s.codec || 'mp3') === 'mp3') || playable[0];
     if (preferred && !streamUrl) {
       streamUrl = preferred.resolvedUrl;
       sel.value = streamUrl;

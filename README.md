@@ -17,8 +17,8 @@ Designed to run on a Raspberry Pi Zero 2W or any Linux box.
 - **Two TTS backends** — local Piper (offline, fast) or Google Cloud TTS
   (Studio voices, higher quality)
 - **Multi-target Icecast streaming** — stream to your home server, a VPN
-  endpoint, and an external service simultaneously; targets reconnect
-  independently on failure
+  endpoint, MediaMTX/RTSP, and an external service simultaneously; targets
+  reconnect independently on failure
 - **Live Boston context** — weather and sports scores injected into DJ prompts
 - **Web UI** — listener view at `/`, password-protected admin at `/admin`
 - **Admin controls** — DJ override, queue next song, view connected listeners,
