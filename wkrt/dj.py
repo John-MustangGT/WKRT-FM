@@ -517,6 +517,8 @@ class DJEngine:
         }).encode()
 
         url = f"http://{host}:{port}/v1/chat/completions"
+        log.info(f"Ollama request → {url} model={model} max_tokens={max_tokens}")
+        log.debug(f"Ollama prompt:\n{prompt}")
         req = Request(url, data=payload, headers={"Content-Type": "application/json"})
         try:
             with urlopen(req, timeout=30) as resp:
