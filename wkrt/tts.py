@@ -29,6 +29,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -135,6 +137,7 @@ class TTSEngine:
             tts_cfg.get("voice_model")
             or tts_cfg.get("google_voice")
             or tts_cfg.get("kokoro_voice")
+            or (f"{tts_cfg.get('url')}#{tts_cfg.get('voice', 'af_heart')}" if backend == "http" else None)
             or "default"
         )
 
@@ -143,7 +146,7 @@ class TTSEngine:
         # Apply pronunciation substitutions for Piper and Kokoro — Google TTS
         # handles these names well on its own and the phonetic spellings would
         # sound odd through its neural pipeline.
-        if backend in ("piper", "kokoro"):
+        if backend in ("piper", "kokoro", "http"):
             extra_pronounce = tts_cfg.get("pronounce")  # per-DJ overrides
             text = _apply_pronounce_table(text, extra_pronounce)
 
@@ -160,6 +163,8 @@ class TTSEngine:
                 wav_path = self._google_tts(text, tts_cfg)
             elif backend == "kokoro":
                 wav_path = self._kokoro_tts(text, tts_cfg)
+            elif backend == "http":
+                wav_path = self._http_tts(text, tts_cfg)
             else:
                 wav_path = self._piper_tts(text, tts_cfg)
             self._wav_to_mp3(wav_path, out_path)
@@ -295,6 +300,32 @@ class TTSEngine:
             return self._silence_wav()
 
         return wav_path
+
+    # ── HTTP TTS backend ──────────────────────────────────────────────────────
+
+    def _http_tts(self, text: str, tts_cfg: dict) -> Path:
+        url = tts_cfg.get("url")
+        if not url:
+            log.error("http TTS backend requires [djs.tts] url = '...' in settings.toml")
+            return self._silence_wav()
+
+        voice = tts_cfg.get("voice", "af_heart")
+        params: dict = {"text": text, "voice": voice}
+        speed = tts_cfg.get("speed")
+        if speed is not None:
+            params["speed"] = str(speed)
+
+        full_url = url + "?" + urllib.parse.urlencode(params)
+        try:
+            with urllib.request.urlopen(full_url, timeout=60) as resp:
+                wav_data = resp.read()
+        except Exception as e:
+            log.error(f"HTTP TTS request to {url!r} failed: {e} — falling back to silence")
+            return self._silence_wav()
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(wav_data)
+            return Path(tmp.name)
 
     # ── Shared helpers ────────────────────────────────────────────────────────
 

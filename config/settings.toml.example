@@ -181,6 +181,11 @@ Comment = "WKRT-FM 104.7 Boston Classic Rock"
 # codec              = "opus"
 # bitrate            = 128
 # format             = "rtsp"
+# metadata_backend   = "rtsp"                      # opt-in RTSP/MediaMTX metadata
+# metadata_backend   = "mediamtx_rest"             # opt-in REST metadata events
+# metadata_rest_url  = "http://127.0.0.1:9997/metadata/{path}"  # your metadata receiver endpoint
+# metadata_title     = "WKRT-FM 104.7"             # optional RTSP session title
+# metadata_comment   = "The Home of Classic Rock"  # optional RTSP session comment
 # ffmpeg_audio_args  = ["-rtsp_transport", "udp"]
 
 #
@@ -318,6 +323,35 @@ noise_w     = 0.8
 # kokoro_voices = "kokoro-voices-v1.0.bin"  # relative to voices_dir
 # speed         = 1.0                  # speaking rate (0.5 ~ 2.0)
 # lang          = "en-us"              # language code
+
+# HTTP TTS DJ (remote TTS server — kokoro-server.py or any WAV-over-HTTP endpoint)
+# Good for air-gapped / disconnected workstations where the TTS server runs locally
+# but in a separate process (e.g. the kokoro.service systemd unit).
+# The engine sends:  GET <url>?text=<text>&voice=<voice>[&speed=<speed>]
+# and expects a WAV audio response.
+# Pronunciation substitutions (same table as the local kokoro backend) are applied
+# before the text is sent so rock names/abbreviations are handled correctly.
+#
+# [[djs]]
+# name        = "Echo"
+# shift_hours = 24
+# tts_backend = "http"
+# persona = """
+# You are Echo, the DJ on WKRT 104.7.
+# You're warm, concise, and love classic rock deep cuts.
+# Keep it real — one or two sentences, no filler.
+# """
+#
+# [djs.clip_types]
+# between_tracks = 0.60
+# trivia         = 0.20
+# dedication     = 0.10
+# station_id     = 0.10
+#
+# [djs.tts]
+# url   = "http://localhost:8880/tts"   # kokoro-server.py endpoint
+# voice = "af_heart"                    # any voice the server supports
+# speed = 1.0                           # passed as ?speed= if set
 
 # Discord webhook (optional)
 # Post now-playing embeds to a Discord channel.

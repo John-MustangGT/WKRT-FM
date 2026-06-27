@@ -537,6 +537,56 @@ class WKRTEngine:
             return "adts"
         return "mp3"
 
+    def _target_metadata_backend(self, target: dict) -> str:
+        """Return the metadata backend used for a target.
+
+        Icecast is the default. Set metadata_backend=rtsp (or mediamtx) to
+        switch a target over to RTSP session metadata emitted by ffmpeg.
+        Set metadata_backend=rest (or mediamtx_rest) to send metadata events to
+        an HTTP endpoint.
+        """
+        explicit_backend = str(target.get("metadata_backend", "")).strip().lower()
+        if explicit_backend in {"rtsp", "mediamtx"}:
+            return "rtsp"
+        if explicit_backend in {"rest", "mediamtx_rest"}:
+            return "rest"
+        if explicit_backend in {"icecast", "icy"}:
+            return "icecast"
+
+        return "icecast"
+
+    def _target_session_metadata_args(self, target: dict) -> list[str]:
+        """Return ffmpeg metadata args when RTSP metadata is enabled."""
+        if self._target_metadata_backend(target) != "rtsp":
+            return []
+
+        station = self.cfg.get("station", {})
+        title = str(target.get("metadata_title", "")).strip()
+        if not title:
+            call_sign = station.get("call_sign", "WKRT")
+            frequency = station.get("frequency", "104.7")
+            title = f"{call_sign}-FM {frequency}"
+
+        comment = str(target.get("metadata_comment", "")).strip()
+        if not comment:
+            comment = str(station.get("tagline", "")).strip()
+
+        args = ["-metadata", f"title={title}"]
+        if comment:
+            args.extend(["-metadata", f"comment={comment}"])
+        return args
+
+    def _target_metadata_rest_url(self, target: dict) -> str:
+        """Return REST metadata endpoint URL for a target."""
+        rest_url = str(target.get("metadata_rest_url", "")).strip()
+        if not rest_url:
+            return ""
+
+        mount = str(target.get("mount", "")).strip().lstrip("/")
+        if "{path}" in rest_url:
+            return rest_url.replace("{path}", mount)
+        return rest_url
+
     def _is_icecast_target(self, target: dict) -> bool:
         """Return True when a target uses Icecast-specific metadata options."""
         protocol = str(target.get("protocol", "")).strip().lower()
@@ -601,6 +651,7 @@ class WKRTEngine:
             "-re", "-f", "mp3", "-i", "pipe:0",
             *audio_args,
             *extra_audio_args,
+            *self._target_session_metadata_args(target),
         ]
         if is_icecast:
             cmd.extend([
@@ -1201,7 +1252,7 @@ class WKRTEngine:
         t.start()
 
     def _send_icy_metadata(self, track_or_title: Track | str):
-        """Push a StreamTitle update to all targets that have source credentials.
+        """Push a metadata update to each target using its configured backend.
         
         Args:
             track_or_title: Either a Track object (uses metadata templates) or
@@ -1210,31 +1261,62 @@ class WKRTEngine:
         from .config import get_metadata_for_target
         
         for target in self._targets:
-            if not target.get("source_password"):
-                continue
-            host = target.get("host", "localhost")
-            port = target.get("port", 8000)
-            mount = target.get("mount", "/wkrt")
-            password = target["source_password"]
-            
-            # Build StreamTitle from track metadata or use title string directly
+            backend = self._target_metadata_backend(target)
+
+            # Build StreamTitle from track metadata or use title string directly.
             if isinstance(track_or_title, Track):
                 metadata = get_metadata_for_target(self.cfg, target, track_or_title)
                 title = metadata.get("StreamTitle", f"{track_or_title.artist} - {track_or_title.title}")
             else:
-                # Legacy: plain string title (for DJ breaks)
+                metadata = {"StreamTitle": track_or_title}
                 title = track_or_title
-            
-            params = urlencode({"mount": mount, "mode": "updinfo", "song": title})
-            url = f"http://{host}:{port}/admin/metadata?{params}"
-            creds = base64.b64encode(f"source:{password}".encode()).decode()
-            req = Request(url, headers={"Authorization": f"Basic {creds}"})
-            try:
-                with urlopen(req, timeout=2):
-                    pass
-                log.debug(f"ICY metadata [{target.get('name', host)}] → {title!r}")
-            except Exception as e:
-                log.debug(f"ICY metadata [{target.get('name', host)}] failed: {e}")
+
+            if backend == "icecast":
+                if not target.get("source_password"):
+                    continue
+                host = target.get("host", "localhost")
+                port = target.get("port", 8000)
+                mount = target.get("mount", "/wkrt")
+                password = target["source_password"]
+
+                params = urlencode({"mount": mount, "mode": "updinfo", "song": title})
+                url = f"http://{host}:{port}/admin/metadata?{params}"
+                creds = base64.b64encode(f"source:{password}".encode()).decode()
+                req = Request(url, headers={"Authorization": f"Basic {creds}"})
+                try:
+                    with urlopen(req, timeout=2):
+                        pass
+                    log.debug(f"ICY metadata [{target.get('name', host)}] → {title!r}")
+                except Exception as e:
+                    log.debug(f"ICY metadata [{target.get('name', host)}] failed: {e}")
+                continue
+
+            if backend == "rest":
+                rest_url = self._target_metadata_rest_url(target)
+                if not rest_url:
+                    log.debug(
+                        "REST metadata backend enabled for target '%s' but metadata_rest_url is empty",
+                        target.get("name", "unknown"),
+                    )
+                    continue
+
+                payload = {
+                    "streamTitle": title,
+                    "metadata": metadata,
+                    "target": {
+                        "name": target.get("name"),
+                        "url": self._target_public_url(target),
+                        "mount": target.get("mount"),
+                    },
+                }
+                body = json.dumps(payload).encode("utf-8")
+                req = Request(rest_url, data=body, headers={"Content-Type": "application/json"})
+                try:
+                    with urlopen(req, timeout=2):
+                        pass
+                    log.debug(f"REST metadata [{target.get('name', rest_url)}] → {title!r}")
+                except Exception as e:
+                    log.debug(f"REST metadata [{target.get('name', rest_url)}] failed: {e}")
 
     def _play(self, segment_path: Path, track: Track, dj_starts_at: Optional[float] = None):
         """Feed segment to all live Icecast streams (or ffplay as fallback).
