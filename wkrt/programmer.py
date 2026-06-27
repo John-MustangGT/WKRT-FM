@@ -191,7 +191,7 @@ class DJProgrammer:
 
     def generate_slot(self, dj_cfg: dict, library: dict, slot: str) -> list[dict]:
         """Ask Claude to pick TRACKS_PER_SLOT tracks for one slot. Returns raw dicts."""
-        if not self.client:
+        if not self.client or dj_cfg.get("api_backend", "anthropic") != "anthropic":
             return []
         n    = self.TRACKS_PER_SLOT
         desc = _SLOT_DESC[slot]
@@ -333,7 +333,7 @@ class DJProgrammer:
         if not pool:
             pool = [t for ts in library.values() for t in ts]
 
-        if not self.client:
+        if not self.client or dj_cfg.get("api_backend", "anthropic") != "anthropic":
             random.shuffle(pool)
             return pool[:self.BLOCK_SIZE]
 
