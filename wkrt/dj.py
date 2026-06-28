@@ -508,13 +508,16 @@ class DJEngine:
         max_tokens = ollama_cfg.get("max_tokens") or self.cfg["api"]["max_tokens"]
 
         think = ollama_cfg.get("think", False)
+        # /no_think in the system prompt is the reliable way to disable thinking
+        # mode on qwen3 and other thinking models via the OpenAI-compatible endpoint.
+        # options.think is ignored by /v1/chat/completions in current Ollama versions.
+        system = self.persona if think else f"/no_think\n{self.persona}"
         payload = json.dumps({
             "model": model,
             "stream": False,
             "max_tokens": max_tokens,
-            "options": {"think": think},
             "messages": [
-                {"role": "system", "content": self.persona},
+                {"role": "system", "content": system},
                 {"role": "user",   "content": prompt},
             ],
         }).encode()
