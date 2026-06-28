@@ -12,6 +12,7 @@ import datetime
 import json
 import random
 import logging
+import re
 import time
 from enum import Enum
 from dataclasses import dataclass
@@ -506,10 +507,12 @@ class DJEngine:
         model = ollama_cfg.get("model", "llama3")
         max_tokens = ollama_cfg.get("max_tokens") or self.cfg["api"]["max_tokens"]
 
+        think = ollama_cfg.get("think", False)
         payload = json.dumps({
             "model": model,
             "stream": False,
             "max_tokens": max_tokens,
+            "options": {"think": think},
             "messages": [
                 {"role": "system", "content": self.persona},
                 {"role": "user",   "content": prompt},
@@ -517,7 +520,7 @@ class DJEngine:
         }).encode()
 
         url = f"http://{host}:{port}/v1/chat/completions"
-        log.info(f"Ollama request → {url} model={model} max_tokens={max_tokens}")
+        log.info(f"Ollama request → {url} model={model} max_tokens={max_tokens} think={think}")
         log.debug(f"Ollama prompt:\n{prompt}")
         req = Request(url, data=payload, headers={"Content-Type": "application/json"})
         try:
@@ -527,6 +530,8 @@ class DJEngine:
             raise RuntimeError(f"Ollama unreachable at {url}: {e}") from e
 
         text = (data["choices"][0]["message"]["content"] or "").strip()
+        # Strip any <think>...</think> blocks that thinking models may leak into content
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         usage = data.get("usage", {})
         return text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
