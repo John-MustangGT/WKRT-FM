@@ -527,17 +527,22 @@ class DJEngine:
         log.info(f"Ollama request → {url} model={model} max_tokens={max_tokens} think={think}")
         log.debug(f"Ollama prompt:\n{prompt}")
         req = Request(url, data=payload, headers={"Content-Type": "application/json"})
+        t0 = time.perf_counter()
         try:
             with urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read())
         except URLError as e:
             raise RuntimeError(f"Ollama unreachable at {url}: {e}") from e
+        elapsed = time.perf_counter() - t0
 
         text = (data["choices"][0]["message"]["content"] or "").strip()
         # Strip any <think>...</think> blocks that thinking models may leak into content
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         usage = data.get("usage", {})
-        return text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+        in_tok  = usage.get("prompt_tokens", 0)
+        out_tok = usage.get("completion_tokens", 0)
+        log.info(f"Ollama response in {elapsed:.1f}s — {in_tok} in / {out_tok} out tokens")
+        return text, in_tok, out_tok
 
     def _fallback_script(self) -> str:
         """Used when API is unavailable."""
