@@ -502,10 +502,11 @@ class DJEngine:
     def _call_ollama(self, prompt: str) -> tuple[str, int, int]:
         """Call a local Ollama instance via its OpenAI-compatible endpoint."""
         ollama_cfg = self.client  # dict stored at init
-        host  = ollama_cfg.get("host", "localhost")
-        port  = ollama_cfg.get("port", 11434)
-        model = ollama_cfg.get("model", "llama3")
+        host       = ollama_cfg.get("host", "localhost")
+        port       = ollama_cfg.get("port", 11434)
+        model      = ollama_cfg.get("model", "llama3")
         max_tokens = ollama_cfg.get("max_tokens") or self.cfg["api"]["max_tokens"]
+        timeout    = ollama_cfg.get("timeout", 120)
 
         think = ollama_cfg.get("think", False)
         # /no_think in the system prompt is the reliable way to disable thinking
@@ -527,7 +528,7 @@ class DJEngine:
         log.debug(f"Ollama prompt:\n{prompt}")
         req = Request(url, data=payload, headers={"Content-Type": "application/json"})
         try:
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, timeout=timeout) as resp:
                 data = json.loads(resp.read())
         except URLError as e:
             raise RuntimeError(f"Ollama unreachable at {url}: {e}") from e
